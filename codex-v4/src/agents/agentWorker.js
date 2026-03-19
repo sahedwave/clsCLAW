@@ -14,7 +14,7 @@ if (!workerData || !parentPort) { module.exports = {}; return; }
 
 const path = require('path');
 
-const { agentId, agentName, task, projectRoot, apiKey, contextFiles, role, memory } = workerData;
+const { agentId, agentName, task, projectRoot, apiKey, contextFiles, role, memory, activeAgentContext = [] } = workerData;
 
 function send(type, payload = {}) { parentPort.postMessage({ type, agentId, ...payload }); }
 function log(msg, level = 'info') { send('log', { msg, level, time: Date.now() }); }
@@ -51,7 +51,12 @@ Role: WRITE documentation. Generate JSDoc/docstrings, update README.md, add inli
 };
 
 function buildSystem() {
-  return (ROLE_PROMPTS[role] || ROLE_PROMPTS.code)(agentName, agentId, projectRoot);
+  const awareness = activeAgentContext.length === 0
+    ? '\n\nNo other active agents currently.'
+    : `\n\nACTIVE AGENT COORDINATION:\n${activeAgentContext.map(a =>
+      `- ${a.name} [${a.status}] role=${a.role}\n  task: ${String(a.task || '').slice(0, 180)}\n  files: ${(a.files || []).join(', ') || '(none yet)'}`
+    ).join('\n')}\n\nAvoid duplicate work and reduce file conflicts. Prefer files not already listed above unless the task explicitly requires overlap.`;
+  return (ROLE_PROMPTS[role] || ROLE_PROMPTS.code)(agentName, agentId, projectRoot) + awareness;
 }
 
 // ── Parser ────────────────────────────────────────────────────────────────────

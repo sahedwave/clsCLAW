@@ -89,6 +89,7 @@ planner.on('plan:cancelled',    p => bc('plan:cancelled',    { plan: p }));
 planner.on('plan:step_started', d => bc('plan:step_started', d));
 planner.on('plan:step_done',    d => bc('plan:step_done',    d));
 planner.on('plan:step_error',   d => bc('plan:step_error',   d));
+planner.on('plan:step_retry',   d => bc('plan:step_retry',   d));
 
 automations.on('job:started', j => bc('job:started', { job: j }));
 automations.on('job:done',    r => bc('job:done',     { result: r }));

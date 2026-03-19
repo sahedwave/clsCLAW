@@ -14,6 +14,8 @@ const TYPE_TO_ROLE = {
   review:  'reviewer',  docs: 'coder', default: 'coder',
 };
 
+const TEST_LOOP_MAX_CYCLES = 3;
+
 class Planner extends EventEmitter {
   constructor({ agentManager, memoryStore }) {
     super();
@@ -86,6 +88,7 @@ dependsOn: array of step ids that must complete first`;
         status:      'pending',
         agentId:     null,
         output:      null,
+        loopState:   null,
       })),
       projectRoot, apiKey, contextFiles,
       createdAt: Date.now(), startedAt: null, completedAt: null,
@@ -112,7 +115,7 @@ dependsOn: array of step ids that must complete first`;
     if (plan.status !== 'pending') throw new Error('Can only edit pending plans');
     plan.steps = updatedSteps.map(s => ({
       ...s, role: TYPE_TO_ROLE[s.type] || TYPE_TO_ROLE.default,
-      status: 'pending', agentId: null, output: null,
+      status: 'pending', agentId: null, output: null, loopState: null,
     }));
     this.emit('plan:updated', this._safe(plan));
     return this._safe(plan);
@@ -170,13 +173,10 @@ dependsOn: array of step ids that must complete first`;
       this.emit('plan:step_started', { planId: plan.id, stepId: step.id });
 
       try {
-        const agent = await this._agentManager.launch({
-          task:         prevOut ? `${step.description}\n\nPrevious steps:\n${prevOut}` : step.description,
-          agentName:    `Step ${step.id}: ${step.description.slice(0,30)}`,
-          role:         step.role,
-          projectRoot:  plan.projectRoot,
-          apiKey:       plan.apiKey,
-          contextFiles: plan.contextFiles,
+        const task = prevOut ? `${step.description}\n\nPrevious steps:\n${prevOut}` : step.description;
+        const agent = await this._launchStepAgent(plan, step, {
+          task,
+          agentName: `Step ${step.id}: ${step.description.slice(0,30)}`,
         });
         step.agentId = agent.id;
         this._watch(plan, step, agent.id);
@@ -189,12 +189,234 @@ dependsOn: array of step ids that must complete first`;
     this.emit('plan:updated', this._safe(plan));
   }
 
+  async _launchStepAgent(plan, step, { task, agentName, roleOverride = null }) {
+    return this._agentManager.launch({
+      task,
+      agentName,
+      role: roleOverride || step.role,
+      projectRoot: plan.projectRoot,
+      apiKey: plan.apiKey,
+      contextFiles: plan.contextFiles,
+    });
+  }
+
+  async _runAgentAndWait(plan, step, { task, agentName, roleOverride = null }) {
+    const agent = await this._launchStepAgent(plan, step, { task, agentName, roleOverride });
+
+    return new Promise((resolve) => {
+      const done = (d) => {
+        const id = d.id || d.agent?.id;
+        if (id !== agent.id) return;
+        cleanup();
+        const record = this._agentManager.get(agent.id);
+        resolve({
+          ok: true,
+          id: agent.id,
+          reply: record?.reply || '',
+          error: record?.error || null,
+          status: record?.status || 'done',
+        });
+      };
+      const error = (d) => {
+        const id = d.id || d.agent?.id;
+        if (id !== agent.id) return;
+        cleanup();
+        const record = this._agentManager.get(agent.id);
+        resolve({
+          ok: false,
+          id: agent.id,
+          reply: record?.reply || '',
+          error: d.agent?.error || d.error || record?.error || 'Agent error',
+          status: 'error',
+        });
+      };
+      const cleanup = () => {
+        this._agentManager.off('agent:exit', done);
+        this._agentManager.off('agent:done', done);
+        this._agentManager.off('agent:error', error);
+        this._agentManager.off('agent:cancelled', error);
+      };
+      this._agentManager.on('agent:exit', done);
+      this._agentManager.on('agent:done', done);
+      this._agentManager.on('agent:error', error);
+      this._agentManager.on('agent:cancelled', error);
+    });
+  }
+
+  async _runSelfCorrectingTestLoop(plan, step, firstAttempt) {
+    let cycle = 1;
+    let lastAttempt = firstAttempt;
+    const history = [];
+
+    while (cycle <= TEST_LOOP_MAX_CYCLES) {
+      const assessment = this._assessTestAttempt(lastAttempt);
+      history.push({
+        cycle,
+        passed: assessment.passed,
+        summary: assessment.summary,
+      });
+
+      if (assessment.passed) {
+        return {
+          ok: true,
+          output: this._buildLoopSummary(lastAttempt.reply, history),
+          loopState: { cyclesUsed: cycle, maxCycles: TEST_LOOP_MAX_CYCLES, history },
+        };
+      }
+
+      if (cycle >= TEST_LOOP_MAX_CYCLES) {
+        return {
+          ok: false,
+          error: this._buildLoopSummary(
+            lastAttempt.reply,
+            history,
+            `Test retries exhausted after ${TEST_LOOP_MAX_CYCLES} cycle(s).`
+          ),
+          loopState: { cyclesUsed: cycle, maxCycles: TEST_LOOP_MAX_CYCLES, history },
+        };
+      }
+
+      this.emit('plan:step_retry', {
+        planId: plan.id,
+        stepId: step.id,
+        cycle,
+        maxCycles: TEST_LOOP_MAX_CYCLES,
+        failureSummary: assessment.summary,
+      });
+
+      const fixTask = [
+        'A test execution attempt failed. Produce a focused code fix proposal.',
+        `Original step goal: ${step.description}`,
+        `Failure summary: ${assessment.summary}`,
+        'Failure context from the failed test run:',
+        lastAttempt.reply || '(no textual output)',
+        '',
+        'Rules:',
+        '- Keep changes minimal and targeted to the failure.',
+        '- Use SAVE_AS blocks so the approval workflow remains intact.',
+      ].join('\n');
+
+      const fixAttempt = await this._runAgentAndWait(plan, step, {
+        roleOverride: 'coder',
+        agentName: `Step ${step.id} fix cycle ${cycle}`,
+        task: fixTask,
+      });
+
+      if (!fixAttempt.ok) {
+        return {
+          ok: false,
+          error: `Fix cycle ${cycle} failed: ${fixAttempt.error || 'Agent error'}`,
+          loopState: { cyclesUsed: cycle, maxCycles: TEST_LOOP_MAX_CYCLES, history },
+        };
+      }
+
+      const rerunTask = [
+        step.description,
+        '',
+        'Re-run the relevant tests after the latest fix. Report concrete pass/fail status.',
+        'Most recent failure summary:',
+        assessment.summary,
+      ].join('\n');
+
+      lastAttempt = await this._runAgentAndWait(plan, step, {
+        roleOverride: 'tester',
+        agentName: `Step ${step.id} test retry ${cycle + 1}`,
+        task: rerunTask,
+      });
+
+      if (!lastAttempt.ok) {
+        return {
+          ok: false,
+          error: `Test retry ${cycle + 1} failed to run: ${lastAttempt.error || 'Agent error'}`,
+          loopState: { cyclesUsed: cycle + 1, maxCycles: TEST_LOOP_MAX_CYCLES, history },
+        };
+      }
+
+      cycle += 1;
+    }
+
+    return {
+      ok: false,
+      error: `Unexpected loop termination for step ${step.id}`,
+      loopState: { cyclesUsed: cycle, maxCycles: TEST_LOOP_MAX_CYCLES, history },
+    };
+  }
+
+  _assessTestAttempt(attempt) {
+    if (!attempt || !attempt.ok) {
+      return { passed: false, summary: attempt?.error || 'Test attempt failed to complete' };
+    }
+
+    const text = `${attempt.reply || ''}\n${attempt.error || ''}`.toLowerCase();
+    const hasPassSignal = /\b(all\s+tests\s+passed|tests?\s+passed|0\s+failed|pass(?:ed)?\s*:\s*\d+)\b/.test(text);
+    const hasFailSignal = /\b(fail(?:ed|ure)?|failing|errors?\b|traceback|assertion\s*error|exit\s*code\s*[:=]\s*[1-9])\b/.test(text);
+
+    if (attempt.error) {
+      return { passed: false, summary: attempt.error };
+    }
+    if (hasFailSignal && !hasPassSignal) {
+      return { passed: false, summary: this._shortSummary(attempt.reply) || 'Test output indicates failures' };
+    }
+    if (hasPassSignal) {
+      return { passed: true, summary: this._shortSummary(attempt.reply) || 'Tests passed' };
+    }
+
+    return {
+      passed: false,
+      summary: this._shortSummary(attempt.reply) || 'Could not verify a successful test run from output',
+    };
+  }
+
+  _shortSummary(text = '') {
+    return text.replace(/\s+/g, ' ').trim().slice(0, 220);
+  }
+
+  _buildLoopSummary(latestReply, history, tail = '') {
+    const attempts = history.map(h => `cycle ${h.cycle}: ${h.passed ? 'pass' : 'fail'} (${h.summary})`).join('\n');
+    const parts = [
+      'Self-correcting test loop summary:',
+      attempts || '(no attempts)',
+      '',
+      'Latest test output:',
+      latestReply || '(no output)',
+    ];
+    if (tail) parts.push('', tail);
+    return parts.join('\n').slice(0, 6000);
+  }
+
   _watch(plan, step, agentId) {
     const done = async (d) => {
       const id = d.id || d.agent?.id;
       if (id !== agentId) return;
       cleanup();
       const a = this._agentManager.get(agentId);
+
+      if (step.type === 'test') {
+        const firstAttempt = {
+          ok: true,
+          id: agentId,
+          reply: a?.reply || `Step ${step.id} completed`,
+          error: a?.error || null,
+          status: a?.status || 'done',
+        };
+        const loopResult = await this._runSelfCorrectingTestLoop(plan, step, firstAttempt);
+        step.loopState = loopResult.loopState;
+
+        if (loopResult.ok) {
+          step.output = (loopResult.output || `Step ${step.id} completed`).slice(0, 3000);
+          step.status = 'done';
+          this.emit('plan:step_done', { planId: plan.id, stepId: step.id });
+          await this._advance(plan);
+          return;
+        }
+
+        step.status = 'error';
+        step.output = (loopResult.error || 'Self-correcting test loop failed').slice(0, 3000);
+        this.emit('plan:step_error', { planId: plan.id, stepId: step.id, error: step.output });
+        await this._advance(plan);
+        return;
+      }
+
       step.output = (a?.reply || `Step ${step.id} completed`).slice(0, 300);
       step.status = 'done';
       this.emit('plan:step_done', { planId: plan.id, stepId: step.id });

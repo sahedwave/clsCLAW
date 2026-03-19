@@ -21,6 +21,8 @@ const { randomUUID: uuid } = require('crypto');
 const MAX_MEMORIES     = 500;
 const MAX_INJECT_CHARS = 3000;
 const TOP_K            = 8;
+const MAX_CONSTRAINTS  = 6;
+const MAX_CONSTRAINT_CHARS = 1400;
 
 class MemoryStore {
   constructor(dataDir) {
@@ -89,17 +91,7 @@ class MemoryStore {
    * Empty string if nothing relevant.
    */
   query(queryText, { projectRoot = null, maxChars = MAX_INJECT_CHARS } = {}) {
-    if (this._memories.length === 0) return '';
-    const queryTags = this._extractTags(queryText);
-    if (queryTags.length === 0) return '';
-
-    const scored = this._memories
-      .filter(m => !projectRoot || !m.projectRoot || m.projectRoot === projectRoot)
-      .map(m => ({ ...m, score: this._scoreMemory(m, queryTags) }))
-      .filter(m => m.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, TOP_K);
-
+    const scored = this._relevantMemories(queryText, { projectRoot, topK: TOP_K });
     if (scored.length === 0) return '';
 
     let result = '--- RELEVANT MEMORY ---\n';
@@ -111,6 +103,51 @@ class MemoryStore {
       chars  += entry.length;
     }
     return result.trim();
+  }
+
+  /**
+   * Convert relevant memories into explicit behavioral constraints.
+   * Returns both structured constraints and a prompt-ready formatted block.
+   * Keeps query()/record* APIs unchanged for compatibility.
+   */
+  queryBehaviorConstraints(
+    queryText,
+    {
+      projectRoot = null,
+      maxConstraints = MAX_CONSTRAINTS,
+      maxChars = MAX_CONSTRAINT_CHARS,
+    } = {},
+  ) {
+    const relevant = this._relevantMemories(queryText, { projectRoot, topK: TOP_K * 2 });
+    if (!relevant.length) return { constraints: [], formatted: '' };
+
+    const constraints = [];
+    const seen = new Set();
+    for (const mem of relevant) {
+      const c = this._memoryToConstraint(mem);
+      if (!c) continue;
+      const key = c.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      constraints.push({
+        text: c,
+        sourceType: mem.type,
+        score: mem.score,
+        memoryId: mem.id,
+      });
+      if (constraints.length >= maxConstraints) break;
+    }
+
+    if (!constraints.length) return { constraints: [], formatted: '' };
+    let formatted = '--- BEHAVIORAL CONSTRAINTS (from memory) ---\n';
+    let chars = formatted.length;
+    for (let i = 0; i < constraints.length; i++) {
+      const line = `${i + 1}. ${constraints[i].text}\n`;
+      if (chars + line.length > maxChars) break;
+      formatted += line;
+      chars += line.length;
+    }
+    return { constraints, formatted: formatted.trim() };
   }
 
   getFileSummary(filePath)       { return this._summaries[filePath] || null; }
@@ -157,6 +194,47 @@ class MemoryStore {
     if (memory.type === 'decision')     score += 1;
     if (memory.type === 'task_outcome') score += 1;
     return score;
+  }
+
+  _relevantMemories(queryText, { projectRoot = null, topK = TOP_K } = {}) {
+    if (this._memories.length === 0) return [];
+    const queryTags = this._extractTags(queryText);
+    if (queryTags.length === 0) return [];
+    return this._memories
+      .filter(m => !projectRoot || !m.projectRoot || m.projectRoot === projectRoot)
+      .map(m => ({ ...m, score: this._scoreMemory(m, queryTags) }))
+      .filter(m => m.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK);
+  }
+
+  _memoryToConstraint(memory) {
+    if (!memory?.content) return null;
+    const extractLine = (prefix) => {
+      const re = new RegExp(`^${prefix}:\\s*(.+)$`, 'mi');
+      const m = memory.content.match(re);
+      return m?.[1]?.trim() || '';
+    };
+
+    if (memory.type === 'user_pref') {
+      const pref = extractLine('Preference');
+      if (!pref) return null;
+      return `Respect user preference: ${pref}.`;
+    }
+
+    if (memory.type === 'decision') {
+      const decision = extractLine('Decision');
+      if (!decision) return null;
+      return `Follow prior decision when applicable: ${decision}.`;
+    }
+
+    if (memory.type === 'task_outcome') {
+      const outcome = extractLine('Outcome');
+      if (!outcome) return null;
+      return `Prefer approaches aligned with successful outcome: ${outcome}.`;
+    }
+
+    return null;
   }
 
   _extractTags(text) {

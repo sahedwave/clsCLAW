@@ -34,7 +34,17 @@ class AgentManager extends EventEmitter {
   /**
    * Launch a new agent. If at max concurrency, queues it.
    */
-  async launch({ task, agentName, projectRoot, apiKey, contextFiles = [], worktreePath = null, role = 'default', memory = '' }) {
+  async launch({
+    task,
+    agentName,
+    projectRoot,
+    apiKey,
+    contextFiles = [],
+    worktreePath = null,
+    role = 'default',
+    memory = '',
+    behavioralConstraints = [],
+  }) {
     const agentId = uuid();
     const name = agentName || `Agent-${agentId.slice(0, 6)}`;
 
@@ -61,17 +71,26 @@ class AgentManager extends EventEmitter {
     const running = [...this._agents.values()].filter(a => a.status === 'running').length;
 
     if (running >= MAX_CONCURRENT_AGENTS) {
-      this._queue.push({ agentId, task, agentName: name, projectRoot, apiKey, contextFiles, worktreePath, role, memory });
+      this._queue.push({
+        agentId, task, agentName: name, projectRoot, apiKey, contextFiles,
+        worktreePath, role, memory, behavioralConstraints,
+      });
       record.status = 'queued';
       this.emit('agent:queued', record);
       return record;
     }
 
-    this._startWorker(agentId, { task, agentName: name, projectRoot, apiKey, contextFiles, worktreePath, role, memory });
+    this._startWorker(agentId, {
+      task, agentName: name, projectRoot, apiKey, contextFiles,
+      worktreePath, role, memory, behavioralConstraints,
+    });
     return record;
   }
 
-  _startWorker(agentId, { task, agentName, projectRoot, apiKey, contextFiles, worktreePath, role = 'default', memory = '' }) {
+  _startWorker(
+    agentId,
+    { task, agentName, projectRoot, apiKey, contextFiles, worktreePath, role = 'default', memory = '', behavioralConstraints = [] },
+  ) {
     const record = this._agents.get(agentId);
     if (!record) return;
 
@@ -87,6 +106,7 @@ class AgentManager extends EventEmitter {
         contextFiles,
         role,
         memory,
+        behavioralConstraints,
       },
     });
 
@@ -280,6 +300,7 @@ class AgentManager extends EventEmitter {
       apiKey,
       contextFiles: [],
       worktreePath: record.worktreePath,
+      behavioralConstraints: [],
     });
     return { ok: true };
   }

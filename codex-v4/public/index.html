@@ -771,7 +771,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
     <h3>Settings</h3>
     <label>Project root</label>
     <input type="text" id="cfg-root" placeholder="/Users/you/my-project" />
-    <label>Anthropic API key</label>
+    <label>Enter Anthropic API Key</label>
     <input type="password" id="cfg-key" placeholder="sk-ant-..." />
     <div class="modal-row">
       <button class="modal-btn" onclick="closeModal('modal-settings')">Cancel</button>
@@ -892,7 +892,8 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
 
 <script>
 // ── State ────────────────────────────────────────────────────────────────────
-let apiKey = localStorage.getItem('cx4_key') || '';
+let apiKey = '';
+let hasStoredAnthropicKey = false;
 let ghToken = localStorage.getItem('cx4_gh') || '';
 let projectRoot = '';
 let messages = [];
@@ -913,8 +914,8 @@ async function init() {
   currentBrowseDir = projectRoot;
   document.getElementById('cwd-disp').textContent = shortPath(projectRoot);
   document.getElementById('cfg-root').value = projectRoot;
-  if (apiKey) document.getElementById('cfg-key').value = apiKey;
   if (ghToken) document.getElementById('gh-tok').value = ghToken;
+  await loadAnthropicKeyConfig();
 
   // Sandbox mode badge
   if (cfg.sandboxInfo) {
@@ -1638,9 +1639,9 @@ async function launchAgent() {
   const useWorktree  = document.getElementById('ag-worktree').value === '1';
   const role         = document.getElementById('ag-role')?.value || 'code';
   if (!task)   { toast('Task required', 'err'); return; }
-  if (!apiKey) { toast('API key required — set in Settings', 'err'); return; }
+  if (!hasAnthropicKey()) { toast('Anthropic API key required — set in Settings', 'err'); return; }
   closeModal('modal-agent');
-  const agent = await api('POST', '/api/agents', { task, agentName, useWorktree, contextQuery, apiKey, role }).catch(err => { toast(err.message, 'err'); return null; });
+  const agent = await api('POST', '/api/agents', { task, agentName, useWorktree, contextQuery, apiKey: currentApiKey(), role }).catch(err => { toast(err.message, 'err'); return null; });
   if (agent) { toast(`⚡ Agent "${agentName}" launched [${role}]`, 'ok'); setView('agents'); loadAgents(); }
 }
 
@@ -1703,8 +1704,8 @@ async function cancelAgent(id) {
 }
 
 async function retryAgent(id) {
-  if (!apiKey) { toast('API key required', 'err'); return; }
-  await api('POST', `/api/agents/${id}/retry`, { apiKey }).catch(err => toast(err.message, 'err'));
+  if (!hasAnthropicKey()) { toast('Anthropic API key required', 'err'); return; }
+  await api('POST', `/api/agents/${id}/retry`, { apiKey: currentApiKey() }).catch(err => toast(err.message, 'err'));
   loadAgents();
 }
 
@@ -1911,7 +1912,7 @@ async function buildIndex() {
   btn.textContent = 'indexing...';
   btn.classList.add('on');
   // Pass apiKey so server can build embeddings if available
-  const r = await api('POST', '/api/context/index', { apiKey }).catch(err => { toast(err.message, 'err'); return null; });
+  const r = await api('POST', '/api/context/index', { apiKey: currentApiKey() }).catch(err => { toast(err.message, 'err'); return null; });
   btn.classList.remove('on');
   if (r?.ok) {
     indexStats = r;
@@ -1928,10 +1929,10 @@ async function buildIndex() {
 }
 
 async function reindexEmbeddings() {
-  if (!apiKey) { toast('API key required for embeddings', 'err'); return; }
+  if (!hasAnthropicKey()) { toast('Anthropic API key required for embeddings', 'err'); return; }
   const btn = document.getElementById('reindex-btn');
   if (btn) { btn.textContent = 'embedding...'; btn.disabled = true; }
-  const r = await api('POST', '/api/context/reindex', { apiKey }).catch(err => { toast(err.message, 'err'); return null; });
+  const r = await api('POST', '/api/context/reindex', { apiKey: currentApiKey() }).catch(err => { toast(err.message, 'err'); return null; });
   if (btn) { btn.textContent = 'rebuild embeddings'; btn.disabled = false; }
   if (r?.ok) {
     toast(`✓ Embeddings built: ${r.chunks} chunks`, 'ok');
@@ -1971,7 +1972,7 @@ async function refreshCtxStats() {
 async function queryCtx() {
   const query = document.getElementById('ctx-query').value.trim();
   if (!query) return;
-  const r = await api('POST', '/api/context/query', { query, maxFiles: 8, apiKey }).catch(err => { toast(err.message, 'err'); return null; });
+  const r = await api('POST', '/api/context/query', { query, maxFiles: 8, apiKey: currentApiKey() }).catch(err => { toast(err.message, 'err'); return null; });
   if (!r) return;
   const el = document.getElementById('ctx-results');
   const modeLabel = r.mode === 'hybrid' ? '🔮 hybrid (semantic+keyword)' : '🔑 keyword only';
@@ -1996,14 +1997,14 @@ function go(text) { document.getElementById('welcome')?.remove(); setView('chat'
 async function sendMsg() {
   const text = document.getElementById('prompt').value.trim();
   if (!text || busy) return;
-  if (!apiKey) { openSettings(); return; }
+  if (!hasAnthropicKey()) { openSettings(); return; }
   document.getElementById('welcome')?.remove();
 
   // Build context
   let ctxParts = [];
   const ctxStats = await api('GET', '/api/context/stats').catch(() => ({}));
   if (ctxStats.indexed) {
-    const ctx = await api('POST', '/api/context/query', { query: text, maxFiles: 8, maxTokens: 10000, apiKey }).catch(() => ({ files: [] }));
+    const ctx = await api('POST', '/api/context/query', { query: text, maxFiles: 8, maxTokens: 10000, apiKey: currentApiKey() }).catch(() => ({ files: [] }));
     if (ctx.files?.length) {
       ctxParts.push(`RELEVANT FILES (scored by relevance to your query):\n\n${ctx.files.map(f => `--- ${f.relativePath} (score:${Math.round(f.score)}) ---\n${f.content}`).join('\n\n')}`);
     }
@@ -2051,7 +2052,7 @@ Be specific, complete, and honest. Produce working code only.`;
 
   try {
     await streamClaude(
-      { apiKey, system, messages },
+      { apiKey: currentApiKey(), system, messages },
       // onToken: append text, update live bubble
       (token) => {
         fullText += token;
@@ -2089,10 +2090,13 @@ Be specific, complete, and honest. Produce working code only.`;
  * Uses fetch() + ReadableStream — no EventSource (which doesn't support POST).
  */
 async function streamClaude({ apiKey, system, messages }, onToken, onDone, onError) {
+  const payload = { system, messages };
+  if (apiKey) payload.apiKey = apiKey;
+
   const response = await fetch('/api/claude/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ apiKey, system, messages }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -2191,6 +2195,8 @@ async function streamExec(command, btn) {
 
   if (btn) { btn.disabled = false; btn.textContent = 'run (requires approval)'; }
 }
+
+function renderAgentReply(text, existingWrap = null) {
   // When called from streaming, the wrap already exists and has the label.
   // When called directly (non-streaming path), create a new wrap.
   const wrap = existingWrap || (() => {
@@ -2486,7 +2492,7 @@ let _activePlanId = null;
 async function generatePlan() {
   const goal = document.getElementById('plan-goal').value.trim();
   if (!goal) { toast('Enter a goal first', 'err'); return; }
-  if (!apiKey) { openSettings(); return; }
+  if (!hasAnthropicKey()) { openSettings(); return; }
 
   const btn = document.getElementById('plan-generate-btn');
   btn.disabled = true;
@@ -2495,7 +2501,7 @@ async function generatePlan() {
   try {
     const plan = await api('POST', '/api/plans', {
       goal,
-      apiKey,
+      apiKey: currentApiKey(),
       contextQuery: goal,
     });
     document.getElementById('plan-goal').value = '';
@@ -2688,16 +2694,40 @@ function clearAgentStream(agentId) {
   }
 }
 
+function hasAnthropicKey() {
+  return !!(apiKey || hasStoredAnthropicKey);
+}
+
+function currentApiKey() {
+  return apiKey || undefined;
+}
+
+async function loadAnthropicKeyConfig() {
+  const keyCfg = await api('GET', '/api/config/api-key').catch(() => ({ anthropicKey: '', hasKey: false }));
+  hasStoredAnthropicKey = !!keyCfg?.hasKey;
+  const masked = keyCfg?.anthropicKey || '';
+  if (masked) document.getElementById('cfg-key').value = masked;
+}
+
 function openSettings() {
   document.getElementById('cfg-root').value = projectRoot;
-  if (apiKey) document.getElementById('cfg-key').value = apiKey;
   document.getElementById('modal-settings').style.display = 'flex';
 }
 
 async function saveSettings() {
   const root = document.getElementById('cfg-root').value.trim();
   const key = document.getElementById('cfg-key').value.trim();
-  if (key) { apiKey = key; localStorage.setItem('cx4_key', key); }
+
+  if (key && key !== '****' && !/^\*{4,}[A-Za-z0-9_-]{4}$/.test(key)) {
+    const keyResp = await api('POST', '/api/config/api-key', { anthropicKey: key }).catch(err => { toast(err.message, 'err'); return null; });
+    if (keyResp?.ok) {
+      apiKey = key;
+      hasStoredAnthropicKey = true;
+      document.getElementById('cfg-key').value = keyResp.anthropicKey || '';
+      toast('✓ Anthropic API key saved', 'ok');
+    }
+  }
+
   if (root) {
     const r = await api('POST', '/api/config', { root, token: document.getElementById('gh-tok').value }).catch(err => { toast(err.message, 'err'); return null; });
     if (r?.ok) { projectRoot = root; currentBrowseDir = root; document.getElementById('cwd-disp').textContent = shortPath(root); loadFiles(); }
