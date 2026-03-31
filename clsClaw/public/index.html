@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Codex Local v4</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>cLoSe</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -16,6 +16,7 @@
   --mono:'JetBrains Mono',monospace;--sans:'Syne',sans-serif;
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);overflow:hidden}
+body{min-height:100vh;min-height:100dvh}
 
 /* ── Shell ── */
 .shell{display:grid;grid-template-columns:48px 220px 1fr 300px;grid-template-rows:46px 1fr;height:100vh}
@@ -141,6 +142,10 @@ textarea#prompt::placeholder{color:var(--hint)}
 .input-foot{display:flex;align-items:center;gap:7px;padding:3px 11px 7px;border-top:1px solid var(--border)}
 .hint{font-size:10px;font-family:var(--mono);color:var(--hint)}
 .kbd{display:inline-flex;background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:1px 4px;font-size:9px;color:var(--muted)}
+.mode-switch{display:flex;gap:6px;align-items:center}
+.mode-btn{font-size:10px;font-family:var(--mono);padding:4px 9px;border-radius:999px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}
+.mode-btn:hover{color:var(--text);background:var(--bg3)}
+.mode-btn.active{color:var(--accent2);border-color:rgba(124,106,247,0.35);background:rgba(124,106,247,0.08)}
 
 /* ── Right panel: tabbed ── */
 .rpanel{background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;min-width:0}
@@ -330,6 +335,14 @@ textarea.editor-ta{flex:1;background:var(--bg3);border:none;outline:none;color:v
 .tl.e{color:var(--red)}
 .tl.c{color:var(--muted)}
 .tl.i{color:var(--muted);font-style:italic}
+.tl.w{color:var(--amber)}
+
+/* Live event log */
+.live-log{height:150px;overflow-y:auto;background:var(--bg3);border-top:1px solid var(--border);padding:6px 9px;font-family:var(--mono);font-size:10px;line-height:1.6}
+.live-log-line{color:var(--muted)}
+.live-log-line.error{color:var(--red)}
+.live-log-line.agent{color:var(--blue)}
+.apiwarn{font-size:10px;font-family:var(--mono);padding:3px 8px;border-radius:6px;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.35);color:var(--red)}
 
 /* Modal */
 .modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:200}
@@ -438,6 +451,32 @@ textarea.diff-edit-ta{flex:1;background:var(--bg3);border:none;outline:none;colo
 .row{display:flex;gap:6px;align-items:center}
 .flex1{flex:1}
 hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
+
+@media (max-width: 980px){
+  html,body{overflow:auto}
+  .shell{
+    grid-template-columns:48px minmax(0,1fr);
+    grid-template-rows:46px auto minmax(0,1fr) auto;
+    min-height:100dvh;
+    height:auto;
+  }
+  .topbar{grid-column:2;grid-row:1}
+  .filepanel{
+    grid-column:2;
+    grid-row:2;
+    max-height:220px;
+    border-right:none;
+    border-bottom:1px solid var(--border);
+  }
+  .main{grid-column:2;grid-row:3;min-height:480px}
+  .rpanel{
+    grid-column:2;
+    grid-row:4;
+    max-height:260px;
+    border-left:none;
+    border-top:1px solid var(--border);
+  }
+}
 </style>
 </head>
 <body>
@@ -468,7 +507,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
 
   <!-- Topbar -->
   <header class="topbar">
-    <div class="logo">codex<sup>v5</sup></div>
+    <div class="logo">cLoSe</div>
     <div class="badge-v4">production</div>
     <div id="sb-badge" class="sb-mode">detecting...</div>
     <div class="cwd-bar" onclick="openSettings()">
@@ -477,6 +516,8 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
     </div>
     <div class="topbar-right">
       <button class="ctx-btn" id="idx-btn" onclick="buildIndex()">index project</button>
+      <div id="api-key-warning" class="apiwarn" style="display:none">⚠ No LLM provider configured</div>
+      <div id="health-indicator" class="ctx-btn">health: unknown</div>
       <div id="health-pill" class="sb-mode" style="cursor:pointer" onclick="showHealth()" title="System health">● ok</div>
       <div class="live" id="live-dot" title="WebSocket"></div>
     </div>
@@ -501,13 +542,13 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
     <div id="view-chat" class="chat-wrap">
       <div class="chat-msgs" id="chat-msgs">
         <div class="welcome" id="welcome">
-          <div class="wt">Real <em>Codex</em>. No fakes.</div>
+          <div class="wt">Real <em>cLoSe</em>. Built to ship.</div>
           <div class="ws">sandbox · approval workflow · git worktrees · real skills · context engine</div>
           <div class="chips">
-            <div class="chip" onclick="go('Analyze my whole project — architecture, bugs, improvements')"><div class="chip-cat">analyze</div><div class="chip-txt">Analyze project</div></div>
-            <div class="chip" onclick="go('Find all bugs in my code and propose fixes with diffs')"><div class="chip-cat">fix</div><div class="chip-txt">Find & fix bugs</div></div>
-            <div class="chip" onclick="go('Refactor my code for better readability and maintainability')"><div class="chip-cat">refactor</div><div class="chip-txt">Refactor codebase</div></div>
-            <div class="chip" onclick="go('Add a new feature to my existing project')"><div class="chip-cat">build</div><div class="chip-txt">Add a feature</div></div>
+            <div class="chip" onclick="go('Analyze my whole project — architecture, bugs, improvements', 'ask')"><div class="chip-cat">analyze</div><div class="chip-txt">Analyze project</div></div>
+            <div class="chip" onclick="go('Find all bugs in my code and propose fixes with diffs', 'build')"><div class="chip-cat">fix</div><div class="chip-txt">Find & fix bugs</div></div>
+            <div class="chip" onclick="go('Refactor my code for better readability and maintainability', 'build')"><div class="chip-cat">refactor</div><div class="chip-txt">Refactor codebase</div></div>
+            <div class="chip" onclick="go('Add a new feature to my existing project', 'build')"><div class="chip-cat">build</div><div class="chip-txt">Add a feature</div></div>
           </div>
         </div>
       </div>
@@ -522,6 +563,10 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
           </div>
           <div class="input-foot">
             <span class="hint"><span class="kbd">↵</span> send &nbsp;·&nbsp; <span class="kbd">⇧↵</span> newline</span>
+            <div class="mode-switch">
+              <button class="mode-btn active" id="mode-ask" onclick="setChatMode('ask')">ask</button>
+              <button class="mode-btn" id="mode-build" onclick="setChatMode('build')">build</button>
+            </div>
             <span class="hint" style="margin-left:auto" id="ctx-status">no index</span>
           </div>
         </div>
@@ -671,7 +716,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
           style="width:100%;background:var(--bg4);border:1px solid var(--border2);border-radius:7px;color:var(--text);font-family:var(--mono);font-size:12px;padding:8px;resize:none;outline:none;box-sizing:border-box"></textarea>
         <div style="display:flex;gap:6px;margin-top:8px">
           <button class="gh-btn primary" id="plan-generate-btn" onclick="generatePlan()">🗺️ Generate plan</button>
-          <span style="font-size:10px;font-family:var(--mono);color:var(--hint);align-self:center">Claude will break this into steps — you review before any agent runs</span>
+          <span style="font-size:10px;font-family:var(--mono);color:var(--hint);align-self:center">cLoSe will break this into steps and keep them reviewable before anything runs</span>
         </div>
       </div>
       <!-- Plan list -->
@@ -719,6 +764,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
       <div class="rpt active" id="rpt-editor" onclick="setRpTab('editor')">editor</div>
       <div class="rpt" id="rpt-agents" onclick="setRpTab('agents')">agents<span class="rp-badge" id="rp-agent-badge" style="display:none">0</span></div>
       <div class="rpt" id="rpt-history" onclick="setRpTab('history')">history</div>
+      <div class="rpt" id="rpt-logs" onclick="setRpTab('logs')">logs</div>
     </div>
 
     <!-- Editor -->
@@ -753,13 +799,21 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
       </div>
     </div>
 
+    <div class="rp-body" id="rp-logs" style="display:none;flex-direction:column;overflow:hidden">
+      <div style="padding:8px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px">
+        <span style="font-size:10px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;flex:1">live system log</span>
+        <button class="ib" onclick="clearLiveLog()">✕</button>
+      </div>
+      <div id="live-log-body" class="live-log"></div>
+    </div>
+
     <div class="term-panel">
       <div class="term-hdr">
         <span class="term-title">terminal</span>
         <button class="ib" onclick="clearTerm()">✕</button>
       </div>
       <div class="term-body" id="term-body">
-        <div class="tl i">$ codex local v4</div>
+        <div class="tl i">$ cLoSe</div>
       </div>
     </div>
   </aside>
@@ -771,8 +825,17 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
     <h3>Settings</h3>
     <label>Project root</label>
     <input type="text" id="cfg-root" placeholder="/Users/you/my-project" />
-    <label>Enter Anthropic API Key</label>
-    <input type="password" id="cfg-key" placeholder="sk-ant-..." />
+    <label>Anthropic key</label>
+    <input type="password" id="cfg-anthropic" placeholder="sk-ant-..." />
+    <label>OpenAI key</label>
+    <input type="password" id="cfg-openai" placeholder="sk-..." />
+    <label>Ollama URL</label>
+    <input type="text" id="cfg-ollama-url" placeholder="http://localhost:11434/api/generate" />
+    <label>Ollama model</label>
+    <input type="text" id="cfg-ollama-model" placeholder="qwen2.5-coder:7b" />
+    <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-top:8px">
+      Any one model provider is enough for chat, agents, and plans. Semantic embeddings still use Anthropic.
+    </div>
     <div class="modal-row">
       <button class="modal-btn" onclick="closeModal('modal-settings')">Cancel</button>
       <button class="modal-btn primary" onclick="saveSettings()">Save</button>
@@ -892,13 +955,24 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
 
 <script>
 // ── State ────────────────────────────────────────────────────────────────────
-let apiKey = '';
-let hasStoredAnthropicKey = false;
+let providerDraft = {
+  anthropicKey: '',
+  openaiKey: '',
+  ollamaUrl: '',
+  ollamaModel: '',
+};
+let providerStatus = {
+  anthropicConfigured: false,
+  openaiConfigured: false,
+  localConfigured: false,
+  llmConfigured: false,
+};
 let ghToken = localStorage.getItem('cx4_gh') || '';
 let projectRoot = '';
 let messages = [];
 let openTabs = [], activeTab = null;
 let busy = false;
+let chatMode = localStorage.getItem('cx4_chat_mode') === 'build' ? 'build' : 'ask';
 let indexStats = null;
 let agentsMap = new Map();
 let newFiles = new Set();
@@ -906,6 +980,7 @@ let currentBrowseDir = '';
 // ws removed — system events now use EventSource (/api/events)
 let skills = [];
 let currentDiffChangeId = null;
+let liveLogEvents = [];
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
@@ -914,8 +989,10 @@ async function init() {
   currentBrowseDir = projectRoot;
   document.getElementById('cwd-disp').textContent = shortPath(projectRoot);
   document.getElementById('cfg-root').value = projectRoot;
+  setChatMode(chatMode, false);
   if (ghToken) document.getElementById('gh-tok').value = ghToken;
-  await loadAnthropicKeyConfig();
+  applyProviderState(cfg.providers || null);
+  if (!cfg.providers) await loadProviderConfig();
 
   // Sandbox mode badge
   if (cfg.sandboxInfo) {
@@ -931,6 +1008,8 @@ async function init() {
   await refreshCtxStats();
   loadHistory();
   connectWS();
+  await refreshHealthPill();
+  updateApiKeyWarning();
 }
 
 // ── SSE system events (replaces broken WebSocket) ────────────────────────────
@@ -942,6 +1021,7 @@ function connectWS() {
   es.onmessage = e => {
     let d;
     try { d = JSON.parse(e.data); } catch { return; }
+    addLiveLog(d.type || 'event', d);
 
     switch (d.type) {
       // Approval queue
@@ -1029,6 +1109,15 @@ function connectWS() {
       case 'plan:step_done':
       case 'plan:step_error':
         updatePlanStep(d);
+        break;
+      case 'system:error':
+        toast('System error: ' + (d.error || 'unknown'), 'err');
+        updateApiKeyWarning(true, d.error || 'System error');
+        break;
+      case 'system:stopped':
+        toast('System stopped: all running agents/plans terminated', 'warn');
+        loadAgents();
+        loadPlans();
         break;
 
       case 'connected':
@@ -1136,7 +1225,7 @@ function setView(v) {
 }
 
 function setRpTab(t) {
-  ['editor','agents','history'].forEach(id => {
+  ['editor','agents','history','logs'].forEach(id => {
     document.getElementById('rp-'+id).style.display = 'none';
     document.getElementById('rpt-'+id)?.classList.remove('active');
   });
@@ -1246,7 +1335,7 @@ async function saveDirectly() {
 
 function askAboutFile() {
   if (!activeTab) return;
-  go(`Analyze the file "${activeTab.name}" — explain what it does, find bugs, security issues, and suggest improvements.`);
+  go(`Analyze the file "${activeTab.name}" — explain what it does, find bugs, security issues, and suggest improvements.`, 'ask');
 }
 
 function newFile() {
@@ -1257,7 +1346,7 @@ function newFile() {
   renderEditor();
 }
 
-function analyzeFile(path, name) { go(`Analyze the file "${name}" — explain it, find bugs, suggest improvements.`); openFile(path, name); }
+function analyzeFile(path, name) { go(`Analyze the file "${name}" — explain it, find bugs, suggest improvements.`, 'ask'); openFile(path, name); }
 
 // ── STEP 2: Approval Queue ────────────────────────────────────────────────────
 async function loadChanges() {
@@ -1639,7 +1728,6 @@ async function launchAgent() {
   const useWorktree  = document.getElementById('ag-worktree').value === '1';
   const role         = document.getElementById('ag-role')?.value || 'code';
   if (!task)   { toast('Task required', 'err'); return; }
-  if (!hasAnthropicKey()) { toast('Anthropic API key required — set in Settings', 'err'); return; }
   closeModal('modal-agent');
   const agent = await api('POST', '/api/agents', { task, agentName, useWorktree, contextQuery, apiKey: currentApiKey(), role }).catch(err => { toast(err.message, 'err'); return null; });
   if (agent) { toast(`⚡ Agent "${agentName}" launched [${role}]`, 'ok'); setView('agents'); loadAgents(); }
@@ -1704,7 +1792,6 @@ async function cancelAgent(id) {
 }
 
 async function retryAgent(id) {
-  if (!hasAnthropicKey()) { toast('Anthropic API key required', 'err'); return; }
   await api('POST', `/api/agents/${id}/retry`, { apiKey: currentApiKey() }).catch(err => toast(err.message, 'err'));
   loadAgents();
 }
@@ -1895,7 +1982,7 @@ async function ghListPRs() {
 async function reviewPR(number, title, owner, repo) {
   const files = await api('POST', '/api/github/pr/files', { ...ghBody(), owner, repo, number }).catch(() => []);
   const diff = files.map(f => `--- ${f.filename} (+${f.additions}/-${f.deletions})\n${(f.patch||'').slice(0,1500)}`).join('\n\n');
-  go(`Review PR #${number}: "${title}"\n\nChanged files:\n${diff}\n\nProvide a thorough code review: logic correctness, bugs, style, edge cases, and a verdict (approve/request changes).`);
+  go(`Review PR #${number}: "${title}"\n\nChanged files:\n${diff}\n\nProvide a thorough code review: logic correctness, bugs, style, edge cases, and a verdict (approve/request changes).`, 'ask');
 }
 
 function showGhOut(id, text, isErr = false) {
@@ -1929,7 +2016,7 @@ async function buildIndex() {
 }
 
 async function reindexEmbeddings() {
-  if (!hasAnthropicKey()) { toast('Anthropic API key required for embeddings', 'err'); return; }
+  if (!hasAnthropicProvider()) { toast('Anthropic API key required for embeddings', 'err'); return; }
   const btn = document.getElementById('reindex-btn');
   if (btn) { btn.textContent = 'embedding...'; btn.disabled = true; }
   const r = await api('POST', '/api/context/reindex', { apiKey: currentApiKey() }).catch(err => { toast(err.message, 'err'); return null; });
@@ -1992,13 +2079,91 @@ async function queryCtx() {
 // ── Chat ──────────────────────────────────────────────────────────────────────
 function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 140) + 'px'; }
 function handleKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } }
-function go(text) { document.getElementById('welcome')?.remove(); setView('chat'); document.getElementById('prompt').value = text; autoResize(document.getElementById('prompt')); sendMsg(); }
+function getPromptPlaceholder(mode = chatMode) {
+  return mode === 'build'
+    ? 'Describe what to build, fix, or refactor...'
+    : 'Ask about the codebase, architecture, bugs, or next steps...';
+}
+
+function setChatMode(mode, persist = true) {
+  chatMode = mode === 'build' ? 'build' : 'ask';
+  if (persist) localStorage.setItem('cx4_chat_mode', chatMode);
+  document.getElementById('mode-ask')?.classList.toggle('active', chatMode === 'ask');
+  document.getElementById('mode-build')?.classList.toggle('active', chatMode === 'build');
+  const prompt = document.getElementById('prompt');
+  if (prompt) prompt.placeholder = getPromptPlaceholder(chatMode);
+}
+
+function inferChatMode(text) {
+  const buildPatterns = [
+    /\b(build|fix|refactor|implement|patch|rewrite|scaffold)\b/i,
+    /\b(add|create|generate)\b.+\b(feature|component|endpoint|api|page|screen|file|test|script)\b/i,
+    /\b(write|edit|modify|update)\b.+\b(code|file|function|component|class|test|script)\b/i,
+    /\b(run|execute)\b.+\b(command|commands|script|scripts|test|tests)\b/i,
+    /\bpropose fixes?\b/i,
+    /\bwith diffs?\b/i,
+    /(?:\/\/|#)\s*save_as:/i,
+    /#\s*run:/i,
+  ];
+  return buildPatterns.some((pattern) => pattern.test(text)) ? 'build' : chatMode;
+}
+
+function buildChatSystem(mode, userText) {
+  if (mode === 'ask') {
+    return `You are cLoSe, a helpful software engineering assistant for a local project.
+Project root: ${projectRoot}
+
+The user is in Ask mode. Default to plain-text answers, analysis, explanations, and high-signal guidance.
+
+Do not output SAVE_AS blocks, RUN commands, shell execution requests, or file-writing instructions unless the user explicitly asks you to modify files or run commands.
+
+If code would help, include small inline examples or fenced code blocks, but keep the response conversational and focused on understanding.`;
+  }
+
+  return `You are cLoSe, a product-minded AI coding agent.
+Project root: ${projectRoot}
+
+The user is in Build mode. Implement requested changes when possible.
+
+Start with short plain-text sections named:
+Understanding:
+Approach:
+Why this approach:
+Self-check:
+
+Do not add source-code comments unless they are genuinely necessary for non-obvious logic.
+
+For files to propose: use exactly this format at the top of code blocks:
+// SAVE_AS: relative/path/filename.ext
+These go through an approval + diff review workflow before writing to disk.
+
+For commands to run: use bash blocks with:
+# RUN: command
+These require user permission before execution.
+
+If the task is purely explanatory, answer plainly. Only emit SAVE_AS or RUN blocks when you are actually proposing a concrete change or command.
+
+User request:
+${userText}`;
+}
+
+function go(text, mode = null) {
+  document.getElementById('welcome')?.remove();
+  if (mode) setChatMode(mode);
+  setView('chat');
+  document.getElementById('prompt').value = text;
+  autoResize(document.getElementById('prompt'));
+  sendMsg();
+}
 
 async function sendMsg() {
   const text = document.getElementById('prompt').value.trim();
   if (!text || busy) return;
-  if (!hasAnthropicKey()) { openSettings(); return; }
   document.getElementById('welcome')?.remove();
+  const modeUsed = inferChatMode(text);
+  if (chatMode === 'ask' && modeUsed === 'build') {
+    toast('Using build behavior for this request', 'warn');
+  }
 
   // Build context
   let ctxParts = [];
@@ -2020,23 +2185,12 @@ async function sendMsg() {
   document.getElementById('send-btn').disabled = true;
   busy = true;
 
-  const system = `You are Codex Local v4, a production AI coding agent.
-Project root: ${projectRoot}
-
-For files to propose: use exactly this format at the top of code blocks:
-// SAVE_AS: relative/path/filename.ext
-These go through an approval + diff review workflow before writing to disk.
-
-For commands to run: use bash blocks with:
-# RUN: command
-These require user permission before execution.
-
-Be specific, complete, and honest. Produce working code only.`;
+  const system = buildChatSystem(modeUsed, text);
 
   // Create the agent message container immediately
   const wrap = document.createElement('div');
   wrap.className = 'msg msg-agent';
-  wrap.appendChild(Object.assign(document.createElement('div'), { className: 'msg-lbl', textContent: 'codex' }));
+  wrap.appendChild(Object.assign(document.createElement('div'), { className: 'msg-lbl', textContent: 'cLoSe' }));
   document.getElementById('chat-msgs').appendChild(wrap);
 
   // Streaming text accumulator
@@ -2051,8 +2205,8 @@ Be specific, complete, and honest. Produce working code only.`;
   scrollBottom();
 
   try {
-    await streamClaude(
-      { apiKey: currentApiKey(), system, messages },
+    await streamModel(
+      { apiKey: currentApiKey(), system, messages, mode: modeUsed },
       // onToken: append text, update live bubble
       (token) => {
         fullText += token;
@@ -2066,7 +2220,7 @@ Be specific, complete, and honest. Produce working code only.`;
         streamDone = true;
         liveBubble.remove();
         messages.push({ role: 'assistant', content: fullText });
-        renderAgentReply(fullText, wrap);
+        renderAgentReply(fullText, wrap, { mode: modeUsed });
         document.getElementById('send-btn').disabled = false;
         busy = false;
         scrollBottom();
@@ -2086,14 +2240,14 @@ Be specific, complete, and honest. Produce working code only.`;
 }
 
 /**
- * Open an SSE connection to /api/claude/stream and call callbacks as events arrive.
+ * Open an SSE connection to /api/chat/stream and call callbacks as events arrive.
  * Uses fetch() + ReadableStream — no EventSource (which doesn't support POST).
  */
-async function streamClaude({ apiKey, system, messages }, onToken, onDone, onError) {
-  const payload = { system, messages };
+async function streamModel({ apiKey, system, messages, mode }, onToken, onDone, onError) {
+  const payload = { system, messages, mode };
   if (apiKey) payload.apiKey = apiKey;
 
-  const response = await fetch('/api/claude/stream', {
+  const response = await fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -2196,17 +2350,19 @@ async function streamExec(command, btn) {
   if (btn) { btn.disabled = false; btn.textContent = 'run (requires approval)'; }
 }
 
-function renderAgentReply(text, existingWrap = null) {
+function renderAgentReply(text, existingWrap = null, options = {}) {
   // When called from streaming, the wrap already exists and has the label.
   // When called directly (non-streaming path), create a new wrap.
+  const mode = options.mode === 'build' ? 'build' : 'ask';
   const wrap = existingWrap || (() => {
     const w = document.createElement('div');
     w.className = 'msg msg-agent';
-    w.appendChild(Object.assign(document.createElement('div'), { className: 'msg-lbl', textContent: 'codex' }));
+    w.appendChild(Object.assign(document.createElement('div'), { className: 'msg-lbl', textContent: 'cLoSe' }));
     document.getElementById('chat-msgs').appendChild(w);
     return w;
   })();
 
+  let buildArtifactsDetected = false;
   const parts = text.split(/(```[\s\S]*?```)/g);
   for (const part of parts) {
     if (part.startsWith('```')) {
@@ -2222,28 +2378,34 @@ function renderAgentReply(text, existingWrap = null) {
       }
       const block = makeCodeBlock(lang, body);
       const saveMatch = body.match(/^(?:\/\/|#)\s*SAVE_AS:\s*(.+)/m);
+      const runMatch = body.match(/^\s*#\s*RUN:\s*(.+)$/m);
       if (saveMatch) {
+        buildArtifactsDetected = true;
         const rel = saveMatch[1].trim();
         const fp = rel.startsWith('/') ? rel : projectRoot + '/' + rel;
-        const propBtn = document.createElement('button');
-        propBtn.className = 'cbtn propose'; propBtn.textContent = 'propose change';
-        propBtn.onclick = async () => {
-          const r = await api('POST', '/api/fs/propose', { filePath: fp, content: body, description: 'AI: write ' + rel }).catch(err => { toast(err.message, 'err'); return null; });
-          if (!r || r.skipped) { toast('No changes or error'); return; }
-          propBtn.textContent = '✓ proposed';
-          toast('📄 Proposed — review in Approval Queue', 'warn');
-          loadChanges(); bumpBadge('changes-badge', 1);
-        };
-        block.querySelector('.cb-acts').prepend(propBtn);
+        if (mode === 'build') {
+          const propBtn = document.createElement('button');
+          propBtn.className = 'cbtn propose'; propBtn.textContent = 'propose change';
+          propBtn.onclick = async () => {
+            const r = await api('POST', '/api/fs/propose', { filePath: fp, content: body, description: 'AI: write ' + rel }).catch(err => { toast(err.message, 'err'); return null; });
+            if (!r || r.skipped) { toast('No changes or error'); return; }
+            propBtn.textContent = '✓ proposed';
+            toast('📄 Proposed — review in Approval Queue', 'warn');
+            loadChanges(); bumpBadge('changes-badge', 1);
+          };
+          block.querySelector('.cb-acts').prepend(propBtn);
+        }
       }
-      if (lang === 'bash' || lang === 'sh') {
-        const runBtn = document.createElement('button');
-        runBtn.className = 'cbtn run'; runBtn.textContent = 'run (requires approval)';
-        runBtn.onclick = () => {
-          const cmd = body.replace(/^#.*\n/, '').trim();
-          streamExec(cmd, runBtn);
-        };
-        block.querySelector('.cb-acts').appendChild(runBtn);
+      if ((lang === 'bash' || lang === 'sh') && runMatch) {
+        buildArtifactsDetected = true;
+        if (mode === 'build') {
+          const runBtn = document.createElement('button');
+          runBtn.className = 'cbtn run'; runBtn.textContent = 'run (requires approval)';
+          runBtn.onclick = () => {
+            streamExec(runMatch[1].trim(), runBtn);
+          };
+          block.querySelector('.cb-acts').appendChild(runBtn);
+        }
       }
       wrap.appendChild(block);
     } else if (part.trim()) {
@@ -2252,6 +2414,13 @@ function renderAgentReply(text, existingWrap = null) {
       b.innerHTML = esc(part).replace(/\n/g, '<br>');
       wrap.appendChild(b);
     }
+  }
+  if (mode === 'ask' && buildArtifactsDetected) {
+    const note = document.createElement('div');
+    note.className = 'bubble';
+    note.style.borderColor = 'rgba(255,198,92,.35)';
+    note.innerHTML = 'Build-style output detected. Switch to <strong>build</strong> mode if you want propose-change or run actions.';
+    wrap.appendChild(note);
   }
   scrollBottom();
 }
@@ -2442,6 +2611,18 @@ async function showHealth() {
     row('Running',         h.agents.running, h.agents.running === 0),
     row('Queued',          h.agents.queued,  h.agents.queued === 0),
     row('Errors',          h.agents.error,   h.agents.error === 0),
+    row('Running (live)',  h.agentsRunning,  h.agentsRunning === 0),
+    row('Queue size',      h.queueSize,      h.queueSize === 0),
+
+    section('Providers'),
+    row('LLM ready',       h.llmReady ? 'yes' : 'no', h.llmReady),
+    row('Anthropic',       h.providers?.anthropicConfigured ? 'configured' : 'not configured', h.providers?.anthropicConfigured),
+    row('OpenAI',          h.providers?.openaiConfigured ? 'configured' : 'not configured', h.providers?.openaiConfigured),
+    row('Ollama',          h.providers?.ollamaReachable ? 'reachable' : h.providers?.localConfigured ? 'configured' : 'not configured', h.providers?.ollamaReachable),
+    row('GitHub',          h.providers?.githubConfigured ? 'configured' : 'not configured', h.providers?.githubConfigured),
+
+    section('Reliability'),
+    row('Last error',      h.lastError?.message || 'none', h.lastError ? false : true),
 
     section('Approval queue'),
     row('Pending changes', h.approvalQueue.pending, h.approvalQueue.pending === 0),
@@ -2464,23 +2645,18 @@ async function showHealth() {
     pill.style.color  = hasIssues ? 'var(--amber)' : 'var(--green)';
     pill.style.borderColor = hasIssues ? 'rgba(251,191,36,0.3)' : 'rgba(52,211,153,0.3)';
     pill.textContent  = hasIssues
-      ? `⚠ ${h.approvalQueue.conflicts > 0 ? h.approvalQueue.conflicts + ' conflict' : h.permissions.pending + ' perm'}`
+      ? `⚠ ${!h.llmReady ? 'provider' : h.approvalQueue.conflicts > 0 ? h.approvalQueue.conflicts + ' conflict' : h.permissions.pending + ' perm'}`
       : '● ok';
   }
+  updateHealthIndicator(h);
+  updateApiKeyWarning(!h.llmReady, h.llmReady ? '' : 'No LLM provider ready');
 }
 
 // Poll health every 30s to keep topbar pill fresh
 setInterval(async () => {
   const h = await api('GET', '/api/health').catch(() => null);
   if (!h) return;
-  const pill = document.getElementById('health-pill');
-  if (!pill) return;
-  const hasIssues = h.status !== 'ok' || h.approvalQueue.conflicts > 0 || h.permissions.pending > 0;
-  pill.style.color  = hasIssues ? 'var(--amber)' : 'var(--green)';
-  pill.style.borderColor = hasIssues ? 'rgba(251,191,36,0.3)' : 'rgba(52,211,153,0.3)';
-  pill.textContent  = hasIssues
-    ? `⚠ ${h.approvalQueue.conflicts > 0 ? h.approvalQueue.conflicts + ' conflict' : h.permissions.pending + ' perm'}`
-    : '● ok';
+  await refreshHealthPill();
   // Update badges from health data
   updateBadge('changes-badge', h.approvalQueue.pending + h.approvalQueue.reviews);
   updateBadge('perms-badge',   h.permissions.pending);
@@ -2492,7 +2668,6 @@ let _activePlanId = null;
 async function generatePlan() {
   const goal = document.getElementById('plan-goal').value.trim();
   if (!goal) { toast('Enter a goal first', 'err'); return; }
-  if (!hasAnthropicKey()) { openSettings(); return; }
 
   const btn = document.getElementById('plan-generate-btn');
   btn.disabled = true;
@@ -2694,19 +2869,71 @@ function clearAgentStream(agentId) {
   }
 }
 
-function hasAnthropicKey() {
-  return !!(apiKey || hasStoredAnthropicKey);
+function isMaskedSecret(value) {
+  return /^\*{4,}[A-Za-z0-9_-]{0,}$/.test(value || '');
+}
+
+function applyProviderState(providers) {
+  if (!providers) return;
+  providerStatus = {
+    anthropicConfigured: !!providers.anthropicConfigured,
+    openaiConfigured: !!providers.openaiConfigured,
+    localConfigured: !!providers.localConfigured,
+    llmConfigured: !!providers.llmConfigured,
+  };
+  providerDraft = {
+    anthropicKey: providers.anthropicKey || '',
+    openaiKey: providers.openaiKey || '',
+    ollamaUrl: providers.ollamaUrl || '',
+    ollamaModel: providers.ollamaModel || '',
+  };
+  const anth = document.getElementById('cfg-anthropic');
+  const openai = document.getElementById('cfg-openai');
+  const ollamaUrl = document.getElementById('cfg-ollama-url');
+  const ollamaModel = document.getElementById('cfg-ollama-model');
+  if (anth) anth.value = providerDraft.anthropicKey;
+  if (openai) openai.value = providerDraft.openaiKey;
+  if (ollamaUrl) ollamaUrl.value = providerDraft.ollamaUrl;
+  if (ollamaModel) ollamaModel.value = providerDraft.ollamaModel;
+}
+
+function hasAnthropicProvider() {
+  const raw = document.getElementById('cfg-anthropic')?.value.trim() || providerDraft.anthropicKey;
+  return providerStatus.anthropicConfigured || (!!raw && !isMaskedSecret(raw));
+}
+
+function hasModelProvider() {
+  const anth = document.getElementById('cfg-anthropic')?.value.trim() || providerDraft.anthropicKey;
+  const openai = document.getElementById('cfg-openai')?.value.trim() || providerDraft.openaiKey;
+  const ollamaUrl = document.getElementById('cfg-ollama-url')?.value.trim() || providerDraft.ollamaUrl;
+  const ollamaModel = document.getElementById('cfg-ollama-model')?.value.trim() || providerDraft.ollamaModel;
+  return !!(
+    providerStatus.llmConfigured ||
+    (anth && !isMaskedSecret(anth)) ||
+    (openai && !isMaskedSecret(openai)) ||
+    ollamaUrl ||
+    ollamaModel
+  );
 }
 
 function currentApiKey() {
-  return apiKey || undefined;
+  const payload = {};
+  const anth = document.getElementById('cfg-anthropic')?.value.trim() || providerDraft.anthropicKey;
+  const openai = document.getElementById('cfg-openai')?.value.trim() || providerDraft.openaiKey;
+  const ollamaUrl = document.getElementById('cfg-ollama-url')?.value.trim() || providerDraft.ollamaUrl;
+  const ollamaModel = document.getElementById('cfg-ollama-model')?.value.trim() || providerDraft.ollamaModel;
+
+  if (anth && !isMaskedSecret(anth)) payload.anthropic = anth;
+  if (openai && !isMaskedSecret(openai)) payload.openai = openai;
+  if (ollamaUrl) payload.ollamaUrl = ollamaUrl;
+  if (ollamaModel) payload.ollamaModel = ollamaModel;
+
+  return Object.keys(payload).length ? payload : undefined;
 }
 
-async function loadAnthropicKeyConfig() {
-  const keyCfg = await api('GET', '/api/config/api-key').catch(() => ({ anthropicKey: '', hasKey: false }));
-  hasStoredAnthropicKey = !!keyCfg?.hasKey;
-  const masked = keyCfg?.anthropicKey || '';
-  if (masked) document.getElementById('cfg-key').value = masked;
+async function loadProviderConfig() {
+  const cfg = await api('GET', '/api/config/providers').catch(() => ({ providers: null }));
+  applyProviderState(cfg?.providers || null);
 }
 
 function openSettings() {
@@ -2716,24 +2943,36 @@ function openSettings() {
 
 async function saveSettings() {
   const root = document.getElementById('cfg-root').value.trim();
-  const key = document.getElementById('cfg-key').value.trim();
+  const githubToken = document.getElementById('gh-tok').value.trim();
+  const anthropicKey = document.getElementById('cfg-anthropic').value.trim();
+  const openaiKey = document.getElementById('cfg-openai').value.trim();
+  const ollamaUrl = document.getElementById('cfg-ollama-url').value.trim();
+  const ollamaModel = document.getElementById('cfg-ollama-model').value.trim();
 
-  if (key && key !== '****' && !/^\*{4,}[A-Za-z0-9_-]{4}$/.test(key)) {
-    const keyResp = await api('POST', '/api/config/api-key', { anthropicKey: key }).catch(err => { toast(err.message, 'err'); return null; });
-    if (keyResp?.ok) {
-      apiKey = key;
-      hasStoredAnthropicKey = true;
-      document.getElementById('cfg-key').value = keyResp.anthropicKey || '';
-      toast('✓ Anthropic API key saved', 'ok');
-    }
-  }
+  const payload = {
+    root,
+    token: githubToken,
+    ollamaUrl,
+    ollamaModel,
+  };
+  if (!isMaskedSecret(anthropicKey)) payload.anthropicKey = anthropicKey;
+  if (!isMaskedSecret(openaiKey)) payload.openaiKey = openaiKey;
 
-  if (root) {
-    const r = await api('POST', '/api/config', { root, token: document.getElementById('gh-tok').value }).catch(err => { toast(err.message, 'err'); return null; });
-    if (r?.ok) { projectRoot = root; currentBrowseDir = root; document.getElementById('cwd-disp').textContent = shortPath(root); loadFiles(); }
+  const r = await api('POST', '/api/config', payload).catch(err => { toast(err.message, 'err'); return null; });
+  if (r?.ok) {
+    projectRoot = root || projectRoot;
+    currentBrowseDir = projectRoot;
+    ghToken = githubToken;
+    if (ghToken) localStorage.setItem('cx4_gh', ghToken);
+    else localStorage.removeItem('cx4_gh');
+    document.getElementById('cwd-disp').textContent = shortPath(projectRoot);
+    applyProviderState(r.providers || null);
+    await loadFiles();
   }
   closeModal('modal-settings');
   toast('✓ Settings saved', 'ok');
+  updateApiKeyWarning();
+  await refreshHealthPill();
 }
 
 // ── Terminal ──────────────────────────────────────────────────────────────────
@@ -2746,6 +2985,61 @@ function termLog(msg, type = '') {
   body.scrollTop = body.scrollHeight;
 }
 function clearTerm() { document.getElementById('term-body').innerHTML = '<div class="tl i">$ cleared</div>'; }
+
+function addLiveLog(type, payload = {}) {
+  const entry = { ts: Date.now(), type, payload };
+  liveLogEvents.push(entry);
+  if (liveLogEvents.length > 200) liveLogEvents = liveLogEvents.slice(-200);
+  const body = document.getElementById('live-log-body');
+  if (!body) return;
+  const line = document.createElement('div');
+  const cls = type.includes('error') || type === 'system:error' ? 'error' : type.startsWith('agent:') ? 'agent' : '';
+  line.className = `live-log-line ${cls}`.trim();
+  const t = new Date(entry.ts).toLocaleTimeString();
+  const summary = payload.error || payload.msg || payload.agent?.name || payload.agentId || '';
+  line.textContent = `[${t}] ${type}${summary ? ' — ' + summary : ''}`;
+  body.appendChild(line);
+  while (body.children.length > 200) body.removeChild(body.firstChild);
+  body.scrollTop = body.scrollHeight;
+}
+
+function clearLiveLog() {
+  liveLogEvents = [];
+  const body = document.getElementById('live-log-body');
+  if (body) body.innerHTML = '';
+}
+
+function updateApiKeyWarning(forceWarn = false, msg = '') {
+  const el = document.getElementById('api-key-warning');
+  if (!el) return;
+  const missing = forceWarn || !hasModelProvider();
+  el.style.display = missing ? 'block' : 'none';
+  el.textContent = missing ? `⚠ ${msg || 'No LLM provider configured'}` : '';
+}
+
+function updateHealthIndicator(h) {
+  const el = document.getElementById('health-indicator');
+  if (!el) return;
+  if (!h) { el.textContent = 'health: unavailable'; return; }
+  const warn = h.status !== 'ok' || h.lastError || !h.llmReady;
+  el.textContent = warn ? 'health: warning' : 'health: good';
+  el.style.color = warn ? 'var(--amber)' : 'var(--green)';
+}
+
+async function refreshHealthPill() {
+  const h = await api('GET', '/api/health').catch(() => null);
+  if (!h) return;
+  const pill = document.getElementById('health-pill');
+  if (!pill) return;
+  const hasIssues = h.status !== 'ok' || h.approvalQueue.conflicts > 0 || h.permissions.pending > 0 || h.lastError;
+  pill.style.color  = hasIssues ? 'var(--amber)' : 'var(--green)';
+  pill.style.borderColor = hasIssues ? 'rgba(251,191,36,0.3)' : 'rgba(52,211,153,0.3)';
+  pill.textContent  = hasIssues
+    ? `⚠ ${h.lastError ? 'system' : !h.llmReady ? 'provider' : h.approvalQueue.conflicts > 0 ? h.approvalQueue.conflicts + ' conflict' : h.permissions.pending + ' perm'}`
+    : '● ok';
+  updateHealthIndicator(h);
+  updateApiKeyWarning(!h.llmReady, h.llmReady ? '' : 'No LLM provider ready');
+}
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }

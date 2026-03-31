@@ -27,7 +27,7 @@ class GitHubClient {
       'Authorization': `token ${this._token}`,
       'Accept': 'application/vnd.github.v3+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'codex-local-v4',
+      'User-Agent': 'cLoSe',
     };
   }
 

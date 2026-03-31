@@ -1,0 +1,7 @@
+.DS_Store
+codex-v4/.DS_Store
+codex-v4/data/
+codex-v4/.codex-worktrees/
+clsClaw/data/
+clsClaw/.codex-worktrees/
+*.codex-bak.*

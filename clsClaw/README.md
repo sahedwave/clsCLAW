@@ -1,6 +1,6 @@
-# Codex Local v4
+# cLoSe
 
-A real Codex-like coding agent that runs on your Mac.  
+A local coding workspace called cLoSe that runs on your Mac.  
 **Zero external npm dependencies** — pure Node.js built-ins only.
 
 ---
@@ -14,12 +14,24 @@ A real Codex-like coding agent that runs on your Mac.
 ## Setup
 
 ```bash
-cd codex-local-v4
+cd clsClaw
 bash start.sh
-# Browser opens at http://localhost:3737
+# Open http://localhost:3737
 ```
 
-First launch: click the folder path in the topbar → set your project root and Anthropic API key.
+First launch: click the folder path in the topbar and set:
+- your project root
+- one model provider (Anthropic, OpenAI, or Ollama)
+- optional GitHub token
+
+Anthropic is only required for semantic embeddings. Chat, agents, and plans can use any configured provider.
+
+## Tests
+
+```bash
+node --test
+# or: npm test
+```
 
 ---
 
@@ -44,7 +56,7 @@ First launch: click the folder path in the topbar → set your project root and 
 ### Agent system (`src/agents/agentManager.js` + `agentWorker.js`)
 - Each agent runs in its own **Worker Thread** — isolated module scope, separate memory.
 - Up to 7 agents run concurrently; extras queue.
-- Agents parse Claude's output for `// SAVE_AS:` and `# RUN:` directives and route them to the approval queue and permission gate respectively. No auto-write.
+- Agents parse model output for `// SAVE_AS:` and `# RUN:` directives and route them to the approval queue and permission gate respectively. No auto-write.
 - Cancel and retry are real (worker `.terminate()` and re-spawn).
 
 ### Permission gate (`src/sandbox/permissions.js`)
@@ -62,7 +74,8 @@ First launch: click the folder path in the topbar → set your project root and 
 - Walks project files, extracts symbols (functions, classes), imports, tokens.
 - Relevance scoring: token overlap + symbol match + filename match + recency.
 - Chunk selection: picks the highest-scoring 100-line chunks within a token budget.
-- **Not** embedding-based — that requires an external API. Stated limitation.
+- Keyword retrieval always works offline.
+- Optional semantic embeddings use Anthropic when configured.
 
 ### Skills (`src/skills/skills.js`)
 - Each skill is a real `execute(projectRoot)` function, not a prompt string.

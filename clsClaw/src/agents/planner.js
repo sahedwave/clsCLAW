@@ -8,10 +8,11 @@
 
 const { EventEmitter } = require('events');
 const { randomUUID: uuid } = require('crypto');
+const modelRouter = require('../llm/modelRouter');
 
 const TYPE_TO_ROLE = {
-  analyze: 'analyzer', code: 'coder', test: 'tester',
-  review:  'reviewer',  docs: 'coder', default: 'coder',
+  analyze: 'analyze', code: 'code', test: 'test',
+  review:  'review',  docs: 'docs', default: 'code',
 };
 
 const TEST_LOOP_MAX_CYCLES = 3;
@@ -51,25 +52,21 @@ dependsOn: array of step ids that must complete first`;
       : '';
     const memSection = memory ? '\n\nProject memory:\n' + memory : '';
 
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514', max_tokens: 1024, system,
-        messages: [{ role:'user', content:`Goal: ${goal}${ctxSection}${memSection}\n\nReturn JSON plan.` }],
-      }),
+    const { text } = await modelRouter.call({
+      role: 'analyze',
+      system,
+      prompt: `Goal: ${goal}${ctxSection}${memSection}\n\nReturn JSON plan.`,
+      apiKey,
+      stream: false,
     });
 
-    if (!r.ok) throw new Error(`Planner API ${r.status}: ${await r.text()}`);
-
-    const data = await r.json();
     let planData;
     try {
-      const raw = (data.content?.[0]?.text || '')
+      const raw = (text || '')
         .replace(/^```json?\s*/i,'').replace(/\s*```$/,'').trim();
       planData = JSON.parse(raw);
     } catch {
-      throw new Error('Planner returned invalid JSON: ' + (data.content?.[0]?.text||'').slice(0,200));
+      throw new Error('Planner returned invalid JSON: ' + (text || '').slice(0, 200));
     }
 
     if (!Array.isArray(planData.steps) || !planData.steps.length)

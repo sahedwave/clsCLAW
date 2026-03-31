@@ -10,17 +10,43 @@ const DEFAULTS = {
   localModel: process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b',
 };
 
-function resolveKeys(apiKey) {
-  if (apiKey && typeof apiKey === 'object') {
-    return {
-      anthropic: apiKey.anthropic || apiKey.claude || apiKey.apiKey || process.env.ANTHROPIC_API_KEY || '',
-      openai: apiKey.openai || apiKey.openaiApiKey || process.env.OPENAI_API_KEY || '',
-    };
+function resolveLocalConfig(input = {}) {
+  const explicitUrl = input.ollamaUrl || input.localUrl || '';
+  const explicitModel = input.ollamaModel || input.localModel || '';
+  const envUrl = process.env.OLLAMA_URL || '';
+  const envModel = process.env.OLLAMA_MODEL || '';
+
+  const localRequested = Boolean(explicitUrl || explicitModel || envUrl || envModel);
+  if (!localRequested) {
+    return { localUrl: '', localModel: '', localConfigured: false };
   }
 
   return {
+    localUrl: explicitUrl || envUrl || OLLAMA_URL,
+    localModel: explicitModel || envModel || DEFAULTS.localModel,
+    localConfigured: true,
+  };
+}
+
+function resolveKeys(apiKey) {
+  if (apiKey && typeof apiKey === 'object') {
+    const local = resolveLocalConfig(apiKey);
+    return {
+      anthropic: apiKey.anthropic || apiKey.claude || apiKey.apiKey || process.env.ANTHROPIC_API_KEY || '',
+      openai: apiKey.openai || apiKey.openaiApiKey || process.env.OPENAI_API_KEY || '',
+      localUrl: local.localUrl,
+      localModel: local.localModel,
+      localConfigured: local.localConfigured,
+    };
+  }
+
+  const local = resolveLocalConfig({});
+  return {
     anthropic: apiKey || process.env.ANTHROPIC_API_KEY || '',
     openai: process.env.OPENAI_API_KEY || '',
+    localUrl: local.localUrl,
+    localModel: local.localModel,
+    localConfigured: local.localConfigured,
   };
 }
 
@@ -41,7 +67,7 @@ function routeProviders(role) {
 async function readSseStream(stream, onEvent) {
   let buffer = '';
   for await (const chunk of stream) {
-    buffer += chunk.toString('utf-8');
+    buffer += Buffer.from(chunk).toString('utf-8');
     const lines = buffer.split('\n');
     buffer = lines.pop();
     for (const line of lines) {
@@ -131,12 +157,18 @@ async function callOpenAI({ system, prompt, stream, onToken, keys }) {
   return { text, provider: 'openai', model: DEFAULTS.openaiModel };
 }
 
-async function callLocal({ system, prompt, stream, onToken }) {
-  const res = await fetch(OLLAMA_URL, {
+async function callLocal({ system, prompt, stream, onToken, keys }) {
+  if (!keys?.localConfigured || !keys?.localUrl || !keys?.localModel) {
+    throw new Error('Missing Ollama configuration');
+  }
+  const localUrl = keys?.localUrl || OLLAMA_URL;
+  const localModel = keys?.localModel || DEFAULTS.localModel;
+
+  const res = await fetch(localUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: DEFAULTS.localModel,
+      model: localModel,
       prompt: system ? `${system}\n\n${prompt}` : prompt,
       stream: !!stream,
     }),
@@ -146,13 +178,13 @@ async function callLocal({ system, prompt, stream, onToken }) {
 
   if (!stream) {
     const json = await res.json();
-    return { text: json.response || '', provider: 'local', model: DEFAULTS.localModel };
+    return { text: json.response || '', provider: 'local', model: localModel };
   }
 
   let text = '';
   let buffer = '';
   for await (const chunk of res.body) {
-    buffer += chunk.toString('utf-8');
+    buffer += Buffer.from(chunk).toString('utf-8');
     const lines = buffer.split('\n');
     buffer = lines.pop();
     for (const line of lines) {
@@ -168,24 +200,38 @@ async function callLocal({ system, prompt, stream, onToken }) {
     }
   }
 
-  return { text, provider: 'local', model: DEFAULTS.localModel };
+  return { text, provider: 'local', model: localModel };
 }
 
 async function call({ role = 'code', prompt, stream = false, system = '', apiKey = null, onToken = null }) {
   const keys = resolveKeys(apiKey);
-  const providers = routeProviders(role);
+  const providers = routeProviders(role).filter((provider) => {
+    if (provider === 'claude') return Boolean(keys.anthropic);
+    if (provider === 'openai') return Boolean(keys.openai);
+    if (provider === 'local') return Boolean(keys.localConfigured);
+    return true;
+  });
   let lastError = null;
+  const errors = [];
+
+  if (providers.length === 0) {
+    throw new Error('No configured model provider available');
+  }
 
   for (const provider of providers) {
     try {
       if (provider === 'claude') return await callClaude({ system, prompt, stream, onToken, keys });
       if (provider === 'openai') return await callOpenAI({ system, prompt, stream, onToken, keys });
-      if (provider === 'local') return await callLocal({ system, prompt, stream, onToken });
+      if (provider === 'local') return await callLocal({ system, prompt, stream, onToken, keys });
     } catch (err) {
       lastError = err;
+      errors.push(`${provider}: ${err.message}`);
     }
   }
 
+  if (errors.length > 1) {
+    throw new Error(errors.join(' | '));
+  }
   throw lastError || new Error('No available model provider');
 }
 
