@@ -1,16 +1,4 @@
-/**
- * memoryStore.js — Persistent memory with relevance-scored injection
- *
- * NOT a log dump. Stores structured memories and scores them
- * against the current query before injecting into context.
- * Only the top-K most relevant memories are injected.
- *
- * Memory types:
- *   file_summary  — what a file does (updated on every approve)
- *   decision      — why something was done (from agent replies)
- *   task_outcome  — what a completed task produced
- *   user_pref     — preferences observed from user behaviour
- */
+
 
 'use strict';
 
@@ -35,7 +23,7 @@ class MemoryStore {
     this._load();
   }
 
-  // ── Write ────────────────────────────────────────────────────────────────
+  
 
   recordTask({ goal, outcome, agentNames = [], projectRoot }) {
     this._add({
@@ -84,12 +72,15 @@ class MemoryStore {
     });
   }
 
-  // ── Query ────────────────────────────────────────────────────────────────
-
-  /**
-   * Return formatted memory string for injection into a prompt.
-   * Empty string if nothing relevant.
-   */
+  recordAutomationNote({ title, note, projectRoot, tags = [] }) {
+    this._add({
+      type: 'task_outcome',
+      key: String(title || 'automation').slice(0, 80),
+      content: `Automation: ${title}\nNote: ${note}`,
+      tags: [...this._extractTags(`${title} ${note}`), ...(Array.isArray(tags) ? tags : [])].slice(0, 30),
+      projectRoot,
+    });
+  }
   query(queryText, { projectRoot = null, maxChars = MAX_INJECT_CHARS } = {}) {
     const scored = this._relevantMemories(queryText, { projectRoot, topK: TOP_K });
     if (scored.length === 0) return '';
@@ -105,11 +96,6 @@ class MemoryStore {
     return result.trim();
   }
 
-  /**
-   * Convert relevant memories into explicit behavioral constraints.
-   * Returns both structured constraints and a prompt-ready formatted block.
-   * Keeps query()/record* APIs unchanged for compatibility.
-   */
   queryBehaviorConstraints(
     queryText,
     {
@@ -161,7 +147,6 @@ class MemoryStore {
     this._save(); this._saveSummaries();
   }
 
-  // ── Internals ────────────────────────────────────────────────────────────
 
   _add(record) {
     this._memories.unshift({
@@ -169,7 +154,7 @@ class MemoryStore {
       content: record.content, tags: record.tags || [],
       projectRoot: record.projectRoot || null, createdAt: Date.now(),
     });
-    // Dedup by type+key
+
     const seen = new Set();
     this._memories = this._memories.filter(m => {
       const k = m.type + ':' + m.key;

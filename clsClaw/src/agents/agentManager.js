@@ -1,12 +1,4 @@
-/**
- * agentManager.js — Agent lifecycle management
- *
- * Manages Worker Threads for agent execution.
- * Routes messages from workers to:
- *   - ApprovalQueue (file proposals)
- *   - PermissionGate (command proposals)
- *   - WebSocket broadcast (status updates)
- */
+
 
 'use strict';
 
@@ -25,15 +17,13 @@ class AgentManager extends EventEmitter {
     this._queue = [];
     this._approvalQueue = approvalQueue;
     this._permissionGate = permissionGate;
-    this._memoryStore = null;   // injected after construction
+    this._memoryStore = null;   
   }
 
-  /** Wire in the memory store after construction */
+  
   setMemoryStore(ms) { this._memoryStore = ms; }
 
-  /**
-   * Launch a new agent. If at max concurrency, queues it.
-   */
+  
   async launch({
     task,
     agentName,
@@ -44,6 +34,8 @@ class AgentManager extends EventEmitter {
     role = 'default',
     memory = '',
     behavioralConstraints = [],
+    identityContext = '',
+    parentAgentId = null,
   }) {
     const agentId = uuid();
     const name = agentName || `Agent-${agentId.slice(0, 6)}`;
@@ -63,9 +55,24 @@ class AgentManager extends EventEmitter {
       worker: null,
       error: null,
       reply: null,
+      provider: null,
+      model: null,
+      parentAgentId,
+      children: [],
+      pendingInputs: [],
+      _projectRoot: projectRoot,
+      _apiKey: apiKey,
+      _contextFiles: contextFiles,
+      _memory: memory,
+      _behavioralConstraints: behavioralConstraints,
+      _identityContext: identityContext,
     };
 
     this._agents.set(agentId, record);
+    if (parentAgentId) {
+      const parent = this._agents.get(parentAgentId);
+      if (parent && !parent.children.includes(agentId)) parent.children.push(agentId);
+    }
     this.emit('agent:created', record);
 
     const running = [...this._agents.values()].filter(a => a.status === 'running').length;
@@ -73,7 +80,7 @@ class AgentManager extends EventEmitter {
     if (running >= MAX_CONCURRENT_AGENTS) {
       this._queue.push({
         agentId, task, agentName: name, projectRoot, apiKey, contextFiles,
-        worktreePath, role, memory, behavioralConstraints,
+        worktreePath, role, memory, behavioralConstraints, identityContext, parentAgentId,
       });
       record.status = 'queued';
       this.emit('agent:queued', record);
@@ -82,14 +89,14 @@ class AgentManager extends EventEmitter {
 
     this._startWorker(agentId, {
       task, agentName: name, projectRoot, apiKey, contextFiles,
-      worktreePath, role, memory, behavioralConstraints,
+      worktreePath, role, memory, behavioralConstraints, identityContext,
     });
     return record;
   }
 
   _startWorker(
     agentId,
-    { task, agentName, projectRoot, apiKey, contextFiles, worktreePath, role = 'default', memory = '', behavioralConstraints = [] },
+    { task, agentName, projectRoot, apiKey, contextFiles, worktreePath, role = 'default', memory = '', behavioralConstraints = [], identityContext = '' },
   ) {
     const record = this._agents.get(agentId);
     if (!record) return;
@@ -107,19 +114,29 @@ class AgentManager extends EventEmitter {
         role,
         memory,
         behavioralConstraints,
+        identityContext,
       },
     });
 
     record.worker   = worker;
     record.status   = 'running';
+    record.task     = task;
+    record.role     = role;
+    record.error    = null;
+    record.endTime  = null;
     record._projectRoot  = projectRoot;   // real project root for safety checks
     record._execRoot     = execRoot;      // where this agent actually writes
+    record._apiKey       = apiKey;
+    record._contextFiles = contextFiles;
+    record._memory       = memory;
+    record._behavioralConstraints = behavioralConstraints;
+    record._identityContext = identityContext;
     this.emit('agent:started', record);
 
-    // Pass BOTH roots to the message handler so it can route correctly
     worker.on('message', (msg) => this._handleWorkerMessage(msg, projectRoot, execRoot));
 
     worker.on('error', (err) => {
+      if (record.status === 'redirecting') return;
       record.status = 'error';
       record.error = err.message;
       record.endTime = Date.now();
@@ -129,12 +146,29 @@ class AgentManager extends EventEmitter {
     });
 
     worker.on('exit', (code) => {
+      if (record._redirectNext) {
+        const nextConfig = record._redirectNext;
+        record._redirectNext = null;
+        record.worker = null;
+        record.status = 'queued';
+        record.logs.push({ msg: 'Interrupted and restarted with a new task', level: 'info', time: Date.now() });
+        this.emit('agent:redirected', { agentId: record.id, task: nextConfig.task });
+        this._startWorker(agentId, nextConfig);
+        return;
+      }
       if (record.status === 'running') {
         record.status = code === 0 ? 'done' : 'error';
       }
       record.endTime = Date.now();
       record.worker = null;
       this.emit('agent:exit', record);
+      if (record.pendingInputs.length > 0 && !['cancelled', 'error'].includes(record.status)) {
+        const nextInput = record.pendingInputs.shift();
+        record.status = 'queued';
+        this.emit('agent:input_started', { agentId: record.id, task: nextInput.task });
+        this._startWorker(agentId, nextInput);
+        return;
+      }
       this._drainQueue(projectRoot, apiKey);
     });
   }
@@ -143,9 +177,8 @@ class AgentManager extends EventEmitter {
     const record = this._agents.get(msg.agentId);
     if (!record) return;
 
-    // execRoot is the directory this agent actually operates in
-    // (worktree path when isolated, projectRoot otherwise).
-    // We stored it on the record in _startWorker — use that as ground truth.
+
+
     const agentExecRoot = record._execRoot || execRoot || projectRoot;
 
     switch (msg.type) {
@@ -155,7 +188,7 @@ class AgentManager extends EventEmitter {
         break;
 
       case 'token':
-        // Streaming token from agent — broadcast so UI can show live typing
+
         this.emit('agent:token', { agentId: msg.agentId, text: msg.text });
         break;
 
@@ -173,10 +206,16 @@ class AgentManager extends EventEmitter {
         this.emit('agent:reply', { agentId: msg.agentId, text: msg.text });
         break;
 
+      case 'meta':
+        record.provider = msg.provider || null;
+        record.model = msg.model || null;
+        this.emit('agent:meta', { agentId: msg.agentId, provider: record.provider, model: record.model });
+        break;
+
       case 'propose_file': {
-        // The worker already resolved filePath relative to execRoot (its projectRoot).
-        // We must NOT re-resolve against projectRoot here — that was the original bug.
-        // msg.filePath is already the correct absolute path inside the worktree (or project).
+
+
+
         const filePath = msg.filePath;
 
         this._approvalQueue.propose({
@@ -185,12 +224,13 @@ class AgentManager extends EventEmitter {
           agentId: msg.agentId,
           agentName: record.name,
           description: `${record.name}: write ${msg.relativePath}`,
-          // projectRoot for this proposal = the exec root of this agent
-          // so that applyDiff writes to the right place (worktree or project)
+
+
           projectRoot: agentExecRoot,
-          // Also track the real project root for UI display
+
           realProjectRoot: projectRoot,
           worktreePath: record.worktreePath || null,
+          approvalContext: msg.approvalContext || null,
         }).then(pending => {
           if (!pending.skipped) {
             record.proposals.push(pending.id);
@@ -208,7 +248,7 @@ class AgentManager extends EventEmitter {
       }
 
       case 'propose_command':
-        // Route to permission gate — does NOT execute
+
         this._permissionGate.request({
           type: 'exec',
           agentId: msg.agentId,
@@ -224,7 +264,7 @@ class AgentManager extends EventEmitter {
         break;
 
       case 'memory':
-        // Agent is reporting things it learned — persist to memory store
+
         if (this._memoryStore) {
           for (const d of (msg.decisions || [])) {
             this._memoryStore.recordDecision({
@@ -234,9 +274,9 @@ class AgentManager extends EventEmitter {
               projectRoot: record._projectRoot || null,
             });
           }
-          // File summaries: we have the path + a short summary string.
-          // updateFileSummary() expects the actual file content to summarise.
-          // Instead use recordTask so the info is stored searchably.
+
+
+
           for (const f of (msg.fileSummaries || [])) {
             this._memoryStore.recordTask({
               goal:       `Modified: ${f.filePath}`,
@@ -265,8 +305,8 @@ class AgentManager extends EventEmitter {
     if (running >= MAX_CONCURRENT_AGENTS) return;
     const next = this._queue.shift();
     if (next) {
-      // Use the queued item's own projectRoot and apiKey if present,
-      // falling back to the caller's values only as a last resort.
+
+
       this._startWorker(next.agentId, {
         ...next,
         projectRoot: next.projectRoot || projectRoot,
@@ -282,8 +322,117 @@ class AgentManager extends EventEmitter {
       record.worker.terminate();
       record.status = 'cancelled';
       record.endTime = Date.now();
+      record.pendingInputs = [];
+      record._redirectNext = null;
       this.emit('agent:cancelled', record);
     }
+    return { ok: true };
+  }
+
+  sendInput(agentId, {
+    task,
+    apiKey,
+    contextFiles,
+    role,
+    memory,
+    behavioralConstraints,
+    identityContext,
+    interrupt = false,
+  }) {
+    const record = this._agents.get(agentId);
+    if (!record) return { ok: false, error: 'Agent not found' };
+    if (!task) return { ok: false, error: 'task required' };
+
+    const nextConfig = {
+      task,
+      agentName: record.name,
+      projectRoot: record._projectRoot,
+      apiKey: apiKey || record._apiKey,
+      contextFiles: contextFiles || record._contextFiles || [],
+      worktreePath: record.worktreePath,
+      role: role || record.role || 'default',
+      memory: typeof memory === 'string' ? memory : (record._memory || ''),
+      behavioralConstraints: behavioralConstraints || record._behavioralConstraints || [],
+      identityContext: typeof identityContext === 'string' ? identityContext : (record._identityContext || ''),
+    };
+
+    if (record.worker) {
+      if (interrupt) {
+        record.status = 'redirecting';
+        record._redirectNext = nextConfig;
+        record.worker.terminate();
+        return { ok: true, interrupted: true, agentId };
+      }
+      record.pendingInputs.push(nextConfig);
+      this.emit('agent:input_queued', { agentId, task, pendingInputs: record.pendingInputs.length });
+      return { ok: true, queued: true, pendingInputs: record.pendingInputs.length };
+    }
+
+    record.status = 'queued';
+    this._startWorker(agentId, nextConfig);
+    return { ok: true, restarted: true, agentId };
+  }
+
+  waitFor(agentIds = [], timeoutMs = 30000) {
+    const ids = Array.from(new Set((agentIds || []).filter(Boolean)));
+    const isFinal = (status) => ['done', 'error', 'cancelled'].includes(status);
+    const snapshot = () => ids.map((id) => this.get(id)).filter(Boolean).map((record) => ({
+      id: record.id,
+      status: record.status,
+      error: record.error || null,
+      provider: record.provider || null,
+      model: record.model || null,
+      reply: record.reply || '',
+    }));
+
+    if (ids.length === 0) return Promise.resolve({ ok: true, agents: [] });
+    if (snapshot().every((agent) => isFinal(agent.status))) {
+      return Promise.resolve({ ok: true, agents: snapshot(), done: true });
+    }
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve({ ok: true, agents: snapshot(), done: false, timedOut: true });
+      }, Math.max(1000, timeoutMs));
+
+      const onEvent = () => {
+        const agents = snapshot();
+        if (agents.length === ids.length && agents.every((agent) => isFinal(agent.status))) {
+          cleanup();
+          resolve({ ok: true, agents, done: true });
+        }
+      };
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.off('agent:status', onEvent);
+        this.off('agent:exit', onEvent);
+        this.off('agent:error', onEvent);
+        this.off('agent:cancelled', onEvent);
+      };
+
+      this.on('agent:status', onEvent);
+      this.on('agent:exit', onEvent);
+      this.on('agent:error', onEvent);
+      this.on('agent:cancelled', onEvent);
+    });
+  }
+
+  close(agentId) {
+    const record = this._agents.get(agentId);
+    if (!record) return { ok: false, error: 'Agent not found' };
+    if (record.worker) return { ok: false, error: 'Cannot close a running agent' };
+    if (record.parentAgentId) {
+      const parent = this._agents.get(record.parentAgentId);
+      if (parent) parent.children = parent.children.filter((id) => id !== agentId);
+    }
+    for (const childId of record.children || []) {
+      const child = this._agents.get(childId);
+      if (child) child.parentAgentId = null;
+    }
+    this._agents.delete(agentId);
+    this.emit('agent:closed', { id: agentId });
     return { ok: true };
   }
 
@@ -296,11 +445,14 @@ class AgentManager extends EventEmitter {
     this._startWorker(agentId, {
       task: record.task,
       agentName: record.name,
-      projectRoot,
-      apiKey,
-      contextFiles: [],
+      projectRoot: projectRoot || record._projectRoot,
+      apiKey: apiKey || record._apiKey,
+      contextFiles: record._contextFiles || [],
       worktreePath: record.worktreePath,
-      behavioralConstraints: [],
+      role: record.role || 'default',
+      memory: record._memory || '',
+      behavioralConstraints: record._behavioralConstraints || [],
+      identityContext: record._identityContext || '',
     });
     return { ok: true };
   }
@@ -319,6 +471,11 @@ class AgentManager extends EventEmitter {
       commands: a.commands,
       error: a.error,
       worktreePath: a.worktreePath,
+      provider: a.provider || null,
+      model: a.model || null,
+      parentAgentId: a.parentAgentId || null,
+      children: a.children || [],
+      pendingInputs: a.pendingInputs?.length || 0,
     }));
   }
 

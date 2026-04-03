@@ -1,33 +1,15 @@
-/**
- * contextEngine.js — Hybrid context engine: keyword + semantic embeddings
- *
- * Two modes, automatically selected:
- *
- *   KEYWORD MODE (always available)
- *     - Token overlap, symbol matching, import graph, recency
- *     - Fast, free, works offline
- *     - Weakness: "where is auth handled?" won't find files named 'middleware.js'
- *
- *   SEMANTIC MODE (requires Anthropic API key)
- *     - Uses Anthropic voyage-code-2 embeddings via /v1/embeddings
- *     - Cosine similarity between query embedding and chunk embeddings
- *     - Finds conceptually related files even without keyword overlap
- *     - Embeddings persisted to data/index/ — rebuilt only when files change
- *
- * Hybrid scoring: final_score = α * semantic_score + (1-α) * keyword_score
- *   α = 0.7 when embeddings available, 0.0 otherwise
- *
- * HONEST NOTE: Embedding generation costs API tokens.
- *   - Each file chunk sent to the embeddings API on first index
- *   - Subsequent queries only embed the query string itself (cheap)
- *   - Falls back to keyword-only if API call fails
- */
+
 
 'use strict';
 
-const fs   = require('fs');
+const fs = require('fs');
 const path = require('path');
 const { createHash } = require('crypto');
+const {
+  resolveEmbeddingProvider,
+  describeEmbeddingStatus,
+  fetchEmbeddings,
+} = require('./embeddingProviders');
 
 const CODE_EXTS = new Set([
   '.js','.ts','.jsx','.tsx','.py','.java','.c','.cpp',
@@ -37,14 +19,13 @@ const CODE_EXTS = new Set([
 ]);
 const IGNORE_DIRS = new Set([
   'node_modules','.git','__pycache__','.next','dist','build',
-  'coverage','.cache','venv','.env','.codex-worktrees',
+  'coverage','.cache','venv','.env','.closeclaw-worktrees',
 ]);
 
-const MAX_FILE_SIZE  = 150 * 1024;
-const CHUNK_LINES    = 80;
-const CHUNK_OVERLAP  = 10;
-const EMBED_MODEL    = 'voyage-code-2';
-const HYBRID_ALPHA   = 0.70;  // weight for semantic vs keyword
+const MAX_FILE_SIZE = 150 * 1024;
+const CHUNK_LINES = 80;
+const CHUNK_OVERLAP = 10;
+const HYBRID_ALPHA = 0.70;
 
 const STOPWORDS = new Set([
   'the','and','for','this','that','with','are','was','but',
@@ -52,16 +33,14 @@ const STOPWORDS = new Set([
   'var','const','return','from','import','function','class',
 ]);
 
-// ── Maths helpers ─────────────────────────────────────────────────────────────
-
 function dotProduct(a, b) {
-  let s = 0;
-  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-  return s;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+  return sum;
 }
 
-function magnitude(v) {
-  return Math.sqrt(v.reduce((s, x) => s + x * x, 0));
+function magnitude(vector) {
+  return Math.sqrt(vector.reduce((sum, item) => sum + item * item, 0));
 }
 
 function cosineSimilarity(a, b) {
@@ -70,56 +49,38 @@ function cosineSimilarity(a, b) {
   return mag === 0 ? 0 : dotProduct(a, b) / mag;
 }
 
-// ── Anthropic embeddings API ──────────────────────────────────────────────────
-
-async function fetchEmbeddings(texts, apiKey) {
-  // Anthropic uses the voyage-code-2 model via their embeddings endpoint
-  const response = await fetch('https://api.anthropic.com/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type':    'application/json',
-      'x-api-key':       apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: EMBED_MODEL,
-      input: texts,
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Embeddings API ${response.status}: ${err}`);
-  }
-
-  const data = await response.json();
-  // Response: { embeddings: [{ embedding: float[] }, ...] }
-  return data.embeddings.map(e => e.embedding);
-}
-
-// ── Embedding store (disk-persisted) ─────────────────────────────────────────
-
 class EmbeddingStore {
   constructor(storeDir) {
-    this._dir  = storeDir;
+    this._dir = storeDir;
     this._file = path.join(storeDir, 'embeddings.json');
-    // Map<chunkId → { embedding: float[], text: string, filePath: string, chunkIdx: number }>
+    this._meta = { providerKey: null, model: null };
     this._data = new Map();
     fs.mkdirSync(storeDir, { recursive: true });
     this._load();
   }
 
-  has(chunkId)       { return this._data.has(chunkId); }
-  get(chunkId)       { return this._data.get(chunkId) || null; }
-  set(chunkId, rec)  { this._data.set(chunkId, rec); }
-  delete(chunkId)    { this._data.delete(chunkId); }
-  size()             { return this._data.size; }
+  has(chunkId) { return this._data.has(chunkId); }
+  get(chunkId) { return this._data.get(chunkId) || null; }
+  set(chunkId, record) { this._data.set(chunkId, record); }
+  delete(chunkId) { this._data.delete(chunkId); }
+  size() { return this._data.size; }
+  getMeta() { return { ...this._meta }; }
 
-  /** Remove all entries for files whose content hash has changed */
+  ensureProvider(meta = {}) {
+    const providerKey = meta.providerKey || null;
+    const model = meta.model || null;
+    const changed = this._meta.providerKey !== providerKey || this._meta.model !== model;
+    if (changed) {
+      this._data.clear();
+      this._meta = { providerKey, model };
+      this.save();
+    }
+  }
+
   pruneStale(currentHashes) {
-    for (const [id, rec] of this._data) {
-      const expected = currentHashes.get(rec.filePath);
-      if (!expected || rec.fileHash !== expected) {
+    for (const [id, record] of this._data) {
+      const expected = currentHashes.get(record.filePath);
+      if (!expected || record.fileHash !== expected) {
         this._data.delete(id);
       }
     }
@@ -127,228 +88,269 @@ class EmbeddingStore {
 
   save() {
     try {
-      const obj = {};
-      for (const [k, v] of this._data) obj[k] = v;
-      fs.writeFileSync(this._file, JSON.stringify(obj), 'utf-8');
-    } catch { /* non-fatal */ }
+      fs.writeFileSync(this._file, JSON.stringify({
+        _meta: this._meta,
+        _data: Object.fromEntries(this._data),
+      }), 'utf-8');
+    } catch {}
   }
 
   _load() {
     try {
-      if (fs.existsSync(this._file)) {
-        const obj = JSON.parse(fs.readFileSync(this._file, 'utf-8'));
-        for (const [k, v] of Object.entries(obj)) this._data.set(k, v);
+      if (!fs.existsSync(this._file)) return;
+      const parsed = JSON.parse(fs.readFileSync(this._file, 'utf-8'));
+      if (parsed && parsed._data && typeof parsed._data === 'object') {
+        this._meta = parsed._meta || { providerKey: null, model: null };
+        this._data = new Map(Object.entries(parsed._data));
+        return;
       }
-    } catch { this._data = new Map(); }
+      if (parsed && typeof parsed === 'object') {
+        this._meta = { providerKey: null, model: null };
+        this._data = new Map(Object.entries(parsed));
+      }
+    } catch {
+      this._meta = { providerKey: null, model: null };
+      this._data = new Map();
+    }
   }
 }
 
-// ── Main engine ───────────────────────────────────────────────────────────────
-
 class ContextEngine {
-  constructor(indexDir = null) {
-    this._index       = new Map();   // filePath → FileRecord
-    this._embedStore  = null;
-    this._indexDir    = indexDir;
+  constructor(indexDir = null, { fetchImpl = fetch } = {}) {
+    this._index = new Map();
+    this._embedStore = null;
+    this._indexDir = indexDir;
     this._lastIndexed = null;
     this._projectRoot = null;
-    this._embeddingStatus = 'disabled'; // 'disabled'|'building'|'ready'|'error'
-    this._embeddingError  = null;
-    this._apiKey      = null;
+    this._embeddingStatus = 'disabled';
+    this._embeddingError = null;
+    this._providerConfig = {};
+    this._fetchImpl = fetchImpl;
   }
 
-  setApiKey(key)  { this._apiKey = key; }
-  setIndexDir(d)  {
-    this._indexDir   = d;
-    this._embedStore = new EmbeddingStore(d);
+  setApiKey(key) {
+    this.setProviderConfig({ anthropic: key || '' });
   }
 
-  // ── Build index ─────────────────────────────────────────────────────────────
+  setProviderConfig(config = {}) {
+    if (!config || typeof config !== 'object') return;
+    this._providerConfig = {
+      ...this._providerConfig,
+      ...config,
+    };
+  }
 
-  async buildIndex(projectRoot, { apiKey = null, buildEmbeddings = false } = {}) {
+  setIndexDir(dir) {
+    this._indexDir = dir;
+    this._embedStore = new EmbeddingStore(dir);
+  }
+
+  async buildIndex(projectRoot, { providerConfig = null, apiKey = null, buildEmbeddings = false } = {}) {
     this._projectRoot = projectRoot;
-    if (apiKey) this._apiKey = apiKey;
+    if (providerConfig) this.setProviderConfig(providerConfig);
+    else if (apiKey) this.setApiKey(apiKey);
     this._index.clear();
 
     const files = this._walkProject(projectRoot);
-    for (const fp of files) {
+    for (const filePath of files) {
       try {
-        const rec = this._indexFile(fp, projectRoot);
-        if (rec) this._index.set(fp, rec);
+        const record = this._indexFile(filePath, projectRoot);
+        if (record) this._index.set(filePath, record);
       } catch {}
     }
 
     this._lastIndexed = Date.now();
-
+    const provider = this._resolveEmbeddingProvider();
     const stats = {
-      files:       this._index.size,
+      files: this._index.size,
       projectRoot,
-      indexedAt:   this._lastIndexed,
-      embeddings:  false,
+      indexedAt: this._lastIndexed,
+      embeddings: false,
+      embeddingProvider: provider?.key || null,
+      embeddingModel: provider?.model || null,
     };
 
-    // Build embeddings if requested and API key available
-    if ((buildEmbeddings || this._apiKey) && this._indexDir) {
+    if ((buildEmbeddings || provider) && this._indexDir && provider) {
       if (!this._embedStore) this._embedStore = new EmbeddingStore(this._indexDir);
       try {
-        await this._buildEmbeddings();
-        stats.embeddings    = true;
+        await this._buildEmbeddings(provider);
+        stats.embeddings = true;
         stats.embeddedChunks = this._embedStore.size();
       } catch (err) {
+        this._embeddingStatus = 'error';
+        this._embeddingError = err.message;
         stats.embeddingError = err.message;
       }
+    } else {
+      this._embeddingStatus = provider ? 'disabled' : 'disabled';
+      this._embeddingError = null;
     }
 
     return stats;
   }
 
-  // ── Rebuild embeddings only (no re-read of files) ───────────────────────────
-
-  async reindex(apiKey) {
+  async reindex(providerConfig = null) {
     if (!this._index.size) throw new Error('Build the index first (/api/context/index)');
-    const key = apiKey || this._apiKey;
-    if (!key) throw new Error('API key required for embeddings');
-    this._apiKey = key;
+    if (providerConfig) this.setProviderConfig(providerConfig);
+    const provider = this._resolveEmbeddingProvider();
+    if (!provider) throw new Error('No embedding provider configured');
     if (!this._embedStore) {
       if (!this._indexDir) throw new Error('indexDir not set');
       this._embedStore = new EmbeddingStore(this._indexDir);
     }
     this._embeddingStatus = 'building';
+    this._embeddingError = null;
     try {
-      await this._buildEmbeddings();
-      this._embeddingStatus = 'ready';
-      return { ok: true, chunks: this._embedStore.size() };
+      await this._buildEmbeddings(provider);
+      return {
+        ok: true,
+        chunks: this._embedStore.size(),
+        provider: provider.key,
+        model: provider.model,
+      };
     } catch (err) {
       this._embeddingStatus = 'error';
-      this._embeddingError  = err.message;
+      this._embeddingError = err.message;
       throw err;
     }
   }
 
-  // ── Query ───────────────────────────────────────────────────────────────────
-
-  async query(queryText, { maxFiles = 10, maxTokens = 12000, apiKey = null } = {}) {
+  async query(queryText, { maxFiles = 10, maxTokens = 12000, providerConfig = null, apiKey = null } = {}) {
     if (!this._index.size) return { files: [], warning: 'Index empty — run /api/context/index first' };
+    if (providerConfig) this.setProviderConfig(providerConfig);
+    else if (apiKey) this.setApiKey(apiKey);
 
-    const key = apiKey || this._apiKey;
+    const provider = this._resolveEmbeddingProvider();
     const queryTokens = this._tokenize(queryText);
 
-    // Keyword scores (always computed)
     const keywordScores = new Map();
-    for (const [fp, rec] of this._index) {
-      const s = this._keywordScore(rec, queryTokens, queryText);
-      if (s > 0) keywordScores.set(fp, s);
+    for (const [filePath, record] of this._index) {
+      const score = this._keywordScore(record, queryTokens, queryText);
+      if (score > 0) keywordScores.set(filePath, score);
     }
 
-    // Semantic scores (when embeddings available)
     let semanticScores = new Map();
-    const hasEmbeddings = this._embedStore && this._embedStore.size() > 0;
+    const hasEmbeddings = Boolean(this._embedStore && this._embedStore.size() > 0 && this._isStoreCompatible(provider));
 
-    if (hasEmbeddings && key) {
+    if (hasEmbeddings && provider) {
       try {
-        semanticScores = await this._semanticQuery(queryText, key);
-      } catch {
-        // Fall back to keyword-only silently
+        semanticScores = await this._semanticQuery(queryText, provider);
+      } catch (err) {
+        this._embeddingError = err.message;
       }
     }
 
-    // Hybrid merge
     const allFiles = new Set([...keywordScores.keys(), ...semanticScores.keys()]);
     const finalScores = [];
+    const maxKeyword = Math.max(1, ...keywordScores.values());
+    const maxSemantic = Math.max(1, ...semanticScores.values());
 
-    // Normalise each set to [0,1]
-    const maxKw  = Math.max(1, ...keywordScores.values());
-    const maxSem = Math.max(1, ...semanticScores.values());
-
-    for (const fp of allFiles) {
-      const kw  = (keywordScores.get(fp)  || 0) / maxKw;
-      const sem = (semanticScores.get(fp) || 0) / maxSem;
+    for (const filePath of allFiles) {
+      const kw = (keywordScores.get(filePath) || 0) / maxKeyword;
+      const sem = (semanticScores.get(filePath) || 0) / maxSemantic;
       const alpha = hasEmbeddings && semanticScores.size > 0 ? HYBRID_ALPHA : 0;
       const score = alpha * sem + (1 - alpha) * kw;
-      if (score > 0) finalScores.push({ filePath: fp, score });
+      if (score > 0) finalScores.push({ filePath, score });
     }
 
     finalScores.sort((a, b) => b.score - a.score);
 
-    // Build result with chunk selection
     let usedTokens = 0;
-    const result = [];
-
+    const files = [];
     for (const { filePath, score } of finalScores.slice(0, maxFiles)) {
       if (usedTokens >= maxTokens) break;
-      const rec = this._index.get(filePath);
-      if (!rec) continue;
-      const budget  = Math.min(maxTokens - usedTokens, 3000);
-      const content = this._getRelevantChunks(rec, queryTokens, budget);
-      result.push({
-        relativePath: rec.relativePath,
-        filePath:     rec.filePath,
-        score:        Math.round(score * 100) / 100,
+      const record = this._index.get(filePath);
+      if (!record) continue;
+      const budget = Math.min(maxTokens - usedTokens, 3000);
+      const content = this._getRelevantChunks(record, queryTokens, budget);
+      files.push({
+        relativePath: record.relativePath,
+        filePath: record.filePath,
+        score: Math.round(score * 100) / 100,
         content,
-        symbols:      rec.symbols,
-        lines:        rec.lines,
+        symbols: record.symbols,
+        lines: record.lines,
       });
       usedTokens += this._estimateTokens(content);
     }
 
     return {
-      files:          result,
-      totalIndexed:   this._index.size,
-      tokensUsed:     usedTokens,
-      mode:           hasEmbeddings && semanticScores.size > 0 ? 'hybrid' : 'keyword',
+      files,
+      totalIndexed: this._index.size,
+      tokensUsed: usedTokens,
+      mode: hasEmbeddings && semanticScores.size > 0 ? 'hybrid' : 'keyword',
       embeddingChunks: this._embedStore?.size() || 0,
+      embeddingProvider: provider?.key || null,
+      embeddingModel: provider?.model || null,
     };
   }
 
   getStats() {
-    if (!this._index.size) return { indexed: false, embeddingStatus: this._embeddingStatus };
-    const byExt = {};
+    const embeddingStatus = describeEmbeddingStatus(this._providerConfig);
+    if (!this._index.size) {
+      return {
+        indexed: false,
+        embeddingStatus: this._embeddingStatus,
+        embeddingProviderSelected: embeddingStatus.selected,
+        embeddingProviderActive: embeddingStatus.active,
+        embeddingProviderModel: embeddingStatus.activeModel,
+      };
+    }
+    const byExtension = {};
     let totalLines = 0;
-    for (const rec of this._index.values()) {
-      byExt[rec.ext] = (byExt[rec.ext] || 0) + 1;
-      totalLines += rec.lines;
+    for (const record of this._index.values()) {
+      byExtension[record.ext] = (byExtension[record.ext] || 0) + 1;
+      totalLines += record.lines;
     }
     return {
-      indexed:          true,
-      files:            this._index.size,
+      indexed: true,
+      files: this._index.size,
       totalLines,
-      byExtension:      byExt,
-      indexedAt:        this._lastIndexed,
-      projectRoot:      this._projectRoot,
-      embeddingStatus:  this._embeddingStatus,
-      embeddingChunks:  this._embedStore?.size() || 0,
-      embeddingError:   this._embeddingError || null,
+      byExtension,
+      indexedAt: this._lastIndexed,
+      projectRoot: this._projectRoot,
+      embeddingStatus: this._embeddingStatus,
+      embeddingChunks: this._embedStore?.size() || 0,
+      embeddingError: this._embeddingError || null,
+      embeddingProviderSelected: embeddingStatus.selected,
+      embeddingProviderActive: embeddingStatus.active,
+      embeddingProviderModel: embeddingStatus.activeModel,
+      embeddingProviderAvailable: embeddingStatus.available,
     };
   }
 
-  // ── Build embeddings for all chunks ─────────────────────────────────────────
-
-  async _buildEmbeddings() {
+  async _buildEmbeddings(provider) {
     this._embeddingStatus = 'building';
-
-    // Compute current file hashes for stale detection
-    const currentHashes = new Map();
-    for (const [fp, rec] of this._index) {
-      currentHashes.set(fp, rec.hash);
+    this._embeddingError = null;
+    if (!provider) throw new Error('No embedding provider configured');
+    if (!this._embedStore) {
+      if (!this._indexDir) throw new Error('indexDir not set');
+      this._embedStore = new EmbeddingStore(this._indexDir);
     }
 
-    // Remove stale embeddings
+    this._embedStore.ensureProvider({
+      providerKey: provider.key,
+      model: provider.model,
+    });
+
+    const currentHashes = new Map();
+    for (const [filePath, record] of this._index) {
+      currentHashes.set(filePath, record.hash);
+    }
     this._embedStore.pruneStale(currentHashes);
 
-    // Collect chunks that need embedding
-    const toEmbed = [];  // { chunkId, text, filePath, fileHash, chunkIdx }
-
-    for (const [fp, rec] of this._index) {
-      const chunks = this._chunkFile(rec);
+    const toEmbed = [];
+    for (const [filePath, record] of this._index) {
+      const chunks = this._chunkFile(record);
       for (let i = 0; i < chunks.length; i++) {
-        const chunkId = `${rec.hash}:${i}`;
+        const chunkId = `${record.hash}:${i}`;
         if (!this._embedStore.has(chunkId)) {
           toEmbed.push({
             chunkId,
-            text:      chunks[i],
-            filePath:  fp,
-            fileHash:  rec.hash,
-            chunkIdx:  i,
+            text: chunks[i],
+            filePath,
+            fileHash: record.hash,
+            chunkIdx: i,
           });
         }
       }
@@ -359,20 +361,20 @@ class ContextEngine {
       return;
     }
 
-    // Batch embed — Anthropic allows up to 128 texts per request
-    const BATCH = 96;
-    for (let i = 0; i < toEmbed.length; i += BATCH) {
-      const batch    = toEmbed.slice(i, i + BATCH);
-      const texts    = batch.map(c => c.text.slice(0, 2000)); // truncate per chunk
-      const vectors  = await fetchEmbeddings(texts, this._apiKey);
-
+    const batchSize = 96;
+    for (let i = 0; i < toEmbed.length; i += batchSize) {
+      const batch = toEmbed.slice(i, i + batchSize);
+      const texts = batch.map((item) => item.text.slice(0, 2000));
+      const vectors = await fetchEmbeddings(texts, provider, { fetchImpl: this._fetchImpl });
       for (let j = 0; j < batch.length; j++) {
         const item = batch[j];
         this._embedStore.set(item.chunkId, {
           embedding: vectors[j],
-          filePath:  item.filePath,
-          fileHash:  item.fileHash,
-          chunkIdx:  item.chunkIdx,
+          filePath: item.filePath,
+          fileHash: item.fileHash,
+          chunkIdx: item.chunkIdx,
+          providerKey: provider.key,
+          model: provider.model,
         });
       }
     }
@@ -381,117 +383,127 @@ class ContextEngine {
     this._embeddingStatus = 'ready';
   }
 
-  // ── Semantic query ───────────────────────────────────────────────────────────
+  async _semanticQuery(queryText, provider) {
+    const [queryVector] = await fetchEmbeddings([queryText.slice(0, 2000)], provider, { fetchImpl: this._fetchImpl });
+    const fileMax = new Map();
 
-  async _semanticQuery(queryText, apiKey) {
-    const [queryVec] = await fetchEmbeddings([queryText.slice(0, 2000)], apiKey);
-
-    // Score each file by max chunk similarity
-    const fileMaxSim = new Map();
-
-    for (let chunkId of this._getAllChunkIds()) {
-      const rec = this._embedStore.get(chunkId);
-      if (!rec) continue;
-      const sim = cosineSimilarity(queryVec, rec.embedding);
-      const cur = fileMaxSim.get(rec.filePath) || 0;
-      if (sim > cur) fileMaxSim.set(rec.filePath, sim);
+    for (const chunkId of this._getAllChunkIds()) {
+      const record = this._embedStore.get(chunkId);
+      if (!record) continue;
+      const score = cosineSimilarity(queryVector, record.embedding);
+      const existing = fileMax.get(record.filePath) || 0;
+      if (score > existing) fileMax.set(record.filePath, score);
     }
 
-    return fileMaxSim;
+    return fileMax;
+  }
+
+  _resolveEmbeddingProvider() {
+    return resolveEmbeddingProvider(this._providerConfig);
+  }
+
+  _isStoreCompatible(provider) {
+    if (!this._embedStore || !provider) return false;
+    const meta = this._embedStore.getMeta();
+    return meta.providerKey === provider.key && meta.model === provider.model;
   }
 
   _getAllChunkIds() {
-    // Collect all chunkIds from the embed store that match current index
     const ids = [];
-    for (const [fp, rec] of this._index) {
-      const chunks = this._chunkFile(rec);
+    for (const record of this._index.values()) {
+      const chunks = this._chunkFile(record);
       for (let i = 0; i < chunks.length; i++) {
-        ids.push(`${rec.hash}:${i}`);
+        ids.push(`${record.hash}:${i}`);
       }
     }
     return ids;
   }
 
-  // ── File chunking ─────────────────────────────────────────────────────────────
-
-  _chunkFile(rec) {
-    const lines  = rec.content.split('\n');
+  _chunkFile(record) {
+    const lines = record.content.split('\n');
     const chunks = [];
     for (let i = 0; i < lines.length; i += CHUNK_LINES - CHUNK_OVERLAP) {
       chunks.push(lines.slice(i, i + CHUNK_LINES).join('\n'));
     }
-    return chunks.length > 0 ? chunks : [rec.content.slice(0, 2000)];
+    return chunks.length > 0 ? chunks : [record.content.slice(0, 2000)];
   }
-
-  // ── Private ───────────────────────────────────────────────────────────────────
 
   _walkProject(dir, depth = 0) {
     if (depth > 10) return [];
     let results = [];
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
-    for (const e of entries) {
-      if (IGNORE_DIRS.has(e.name)) continue;
-      const fp = path.join(dir, e.name);
-      if (e.isDirectory()) results = results.concat(this._walkProject(fp, depth + 1));
-      else if (CODE_EXTS.has(path.extname(e.name).toLowerCase())) results.push(fp);
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    for (const entry of entries) {
+      if (IGNORE_DIRS.has(entry.name)) continue;
+      const filePath = path.join(dir, entry.name);
+      if (entry.isDirectory()) results = results.concat(this._walkProject(filePath, depth + 1));
+      else if (CODE_EXTS.has(path.extname(entry.name).toLowerCase())) results.push(filePath);
     }
     return results;
   }
 
-  _indexFile(fp, projectRoot) {
-    const stat = fs.statSync(fp);
+  _indexFile(filePath, projectRoot) {
+    const stat = fs.statSync(filePath);
     if (stat.size > MAX_FILE_SIZE) return null;
-    const content = fs.readFileSync(fp, 'utf-8');
-    const ext     = path.extname(fp).toLowerCase();
-    const hash    = createHash('sha256').update(content).digest('hex').slice(0, 16);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const ext = path.extname(filePath).toLowerCase();
+    const hash = createHash('sha256').update(content).digest('hex').slice(0, 16);
     return {
-      filePath:     fp,
-      relativePath: path.relative(projectRoot, fp),
+      filePath,
+      relativePath: path.relative(projectRoot, filePath),
       ext,
-      size:         stat.size,
-      lines:        content.split('\n').length,
-      modifiedAt:   stat.mtimeMs,
+      size: stat.size,
+      lines: content.split('\n').length,
+      modifiedAt: stat.mtimeMs,
       hash,
       content,
-      symbols:      this._extractSymbols(content, ext),
-      imports:      this._extractImports(content, ext),
-      tokens:       this._tokenize(content),
+      symbols: this._extractSymbols(content, ext),
+      imports: this._extractImports(content),
+      tokens: this._tokenize(content),
     };
   }
 
   _extractSymbols(content, ext) {
-    const syms = [];
-    const pats = ['.js','.ts','.jsx','.tsx'].includes(ext) ? [
+    const symbols = [];
+    const patterns = ['.js','.ts','.jsx','.tsx'].includes(ext) ? [
       /(?:export\s+)?(?:async\s+)?function\s+(\w+)/g,
       /class\s+(\w+)/g,
       /(?:export\s+)?const\s+(\w+)\s*=/g,
     ] : ext === '.py' ? [
-      /^def\s+(\w+)/gm, /^class\s+(\w+)/gm, /^async\s+def\s+(\w+)/gm,
-    ] : [ /(?:function|class|def|fn|func)\s+(\w+)/g ];
+      /^def\s+(\w+)/gm,
+      /^class\s+(\w+)/gm,
+      /^async\s+def\s+(\w+)/gm,
+    ] : [/(?:function|class|def|fn|func)\s+(\w+)/g];
 
     const seen = new Set();
-    for (const p of pats) {
-      const re = new RegExp(p.source, p.flags);
-      let m;
-      while ((m = re.exec(content)) !== null) {
-        if (m[1] && !seen.has(m[1])) { seen.add(m[1]); syms.push(m[1]); }
+    for (const pattern of patterns) {
+      const regex = new RegExp(pattern.source, pattern.flags);
+      let match;
+      while ((match = regex.exec(content)) !== null) {
+        if (match[1] && !seen.has(match[1])) {
+          seen.add(match[1]);
+          symbols.push(match[1]);
+        }
       }
     }
-    return syms.slice(0, 50);
+    return symbols.slice(0, 50);
   }
 
-  _extractImports(content, ext) {
+  _extractImports(content) {
     const imports = [];
-    const pats = [
+    const patterns = [
       /import\s+.*?\s+from\s+['"]([^'"]+)['"]/g,
       /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
       /from\s+(\S+)\s+import/g,
     ];
-    for (const p of pats) {
-      let m;
-      while ((m = p.exec(content)) !== null) {
-        if (m[1] && !imports.includes(m[1])) imports.push(m[1]);
+    for (const pattern of patterns) {
+      let match;
+      while ((match = pattern.exec(content)) !== null) {
+        if (match[1] && !imports.includes(match[1])) imports.push(match[1]);
       }
     }
     return imports.slice(0, 20);
@@ -501,63 +513,58 @@ class ContextEngine {
     return text.toLowerCase()
       .replace(/[^a-z0-9_$]/g, ' ')
       .split(/\s+/)
-      .filter(t => t.length > 2 && !STOPWORDS.has(t));
+      .filter((token) => token.length > 2 && !STOPWORDS.has(token));
   }
 
-  _keywordScore(rec, queryTokens, rawQuery) {
+  _keywordScore(record, queryTokens, rawQuery) {
     let score = 0;
-    const fileTokenSet = new Set(rec.tokens);
-
-    for (const qt of queryTokens) {
-      if (fileTokenSet.has(qt)) score += 2;
+    const tokenSet = new Set(record.tokens);
+    for (const queryToken of queryTokens) {
+      if (tokenSet.has(queryToken)) score += 2;
     }
-    for (const sym of rec.symbols) {
-      if (rawQuery.toLowerCase().includes(sym.toLowerCase())) score += 10;
-      for (const qt of queryTokens) {
-        if (sym.toLowerCase().includes(qt)) score += 5;
+    for (const symbol of record.symbols) {
+      if (rawQuery.toLowerCase().includes(symbol.toLowerCase())) score += 10;
+      for (const queryToken of queryTokens) {
+        if (symbol.toLowerCase().includes(queryToken)) score += 5;
       }
     }
-    for (const imp of rec.imports) {
-      for (const qt of queryTokens) {
-        if (imp.toLowerCase().includes(qt)) score += 3;
+    for (const imported of record.imports) {
+      for (const queryToken of queryTokens) {
+        if (imported.toLowerCase().includes(queryToken)) score += 2;
       }
     }
-    const ageDays = (Date.now() - rec.modifiedAt) / 86400000;
-    if (ageDays < 1) score += 5;
-    else if (ageDays < 7) score += 2;
-
-    const fn = path.basename(rec.filePath).toLowerCase();
-    for (const qt of queryTokens) {
-      if (fn.includes(qt)) score += 8;
-    }
+    if (record.relativePath.toLowerCase().includes(rawQuery.toLowerCase())) score += 8;
     return score;
   }
 
-  _getRelevantChunks(rec, queryTokens, tokenBudget) {
-    const lines = rec.content.split('\n');
-    if (lines.length <= CHUNK_LINES) return rec.content.slice(0, tokenBudget * 4);
-
+  _getRelevantChunks(record, queryTokens, tokenBudget) {
+    const lines = record.content.split('\n');
     const chunks = [];
     for (let i = 0; i < lines.length; i += CHUNK_LINES - CHUNK_OVERLAP) {
-      const text  = lines.slice(i, i + CHUNK_LINES).join('\n');
-      const toks  = new Set(this._tokenize(text));
-      let score   = 0;
-      for (const qt of queryTokens) { if (toks.has(qt)) score++; }
+      const text = lines.slice(i, i + CHUNK_LINES).join('\n');
+      const tokens = new Set(this._tokenize(text));
+      let score = 0;
+      for (const queryToken of queryTokens) {
+        if (tokens.has(queryToken)) score++;
+      }
       chunks.push({ text, startLine: i, score });
     }
     chunks.sort((a, b) => b.score - a.score);
 
-    let result = '', used = 0;
-    for (const c of chunks) {
-      const est = this._estimateTokens(c.text);
-      if (used + est > tokenBudget) break;
-      result += `// Lines ${c.startLine + 1}–${c.startLine + CHUNK_LINES}\n${c.text}\n\n`;
-      used   += est;
+    let result = '';
+    let used = 0;
+    for (const chunk of chunks) {
+      const estimated = this._estimateTokens(chunk.text);
+      if (used + estimated > tokenBudget) break;
+      result += `\n[${record.relativePath}:${chunk.startLine + 1}]\n${chunk.text}\n`;
+      used += estimated;
     }
-    return result || rec.content.slice(0, tokenBudget * 4);
+    return result || record.content.slice(0, tokenBudget * 4);
   }
 
-  _estimateTokens(text) { return Math.ceil(text.length / 4); }
+  _estimateTokens(text) {
+    return Math.ceil(text.length / 4);
+  }
 }
 
 module.exports = ContextEngine;

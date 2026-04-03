@@ -36,6 +36,7 @@ test('resolveProviderConfig merges stored values with request overrides', () => 
     openaiKey: 'stored-openai',
     githubToken: 'ghp_stored',
     ollamaUrl: 'http://localhost:11434/api/generate',
+    embeddingProvider: 'openai',
   });
 
   const resolved = resolveProviderConfig({
@@ -48,6 +49,7 @@ test('resolveProviderConfig merges stored values with request overrides', () => 
   assert.equal(resolved.githubToken, 'ghp_stored');
   assert.equal(resolved.ollamaUrl, 'http://localhost:11434/api/generate');
   assert.equal(resolved.ollamaModel, 'qwen2.5-coder:7b');
+  assert.equal(resolved.embeddingProvider, 'openai');
 });
 
 test('resolveProviderConfig honors explicit empty values so keys can be cleared', () => {
@@ -62,6 +64,7 @@ test('masked provider config and status report configured providers', () => {
   saveConfig({
     openaiKey: 'sk-openai-1234',
     githubToken: 'ghp_secret_1234',
+    embeddingProvider: 'openai',
   });
 
   const masked = getMaskedProviderConfig();
@@ -69,8 +72,10 @@ test('masked provider config and status report configured providers', () => {
 
   assert.match(masked.openaiKey, /^\*+1234$/);
   assert.match(masked.githubToken, /^\*+1234$/);
+  assert.equal(masked.embeddingProvider, 'openai');
   assert.equal(status.anthropicConfigured, false);
   assert.equal(status.openaiConfigured, true);
   assert.equal(status.githubConfigured, true);
+  assert.equal(status.embeddingProvider, 'openai');
   assert.equal(status.llmConfigured, true);
 });

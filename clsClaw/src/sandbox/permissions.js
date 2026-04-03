@@ -1,12 +1,4 @@
-/**
- * permissions.js — Permission gate system
- *
- * Every destructive or sensitive action goes through this gate.
- * Actions are queued as "pending permissions" — the UI must
- * explicitly approve them before execution proceeds.
- *
- * This is NOT fire-and-forget. Execution is BLOCKED until approved.
- */
+
 
 'use strict';
 
@@ -16,23 +8,13 @@ const { randomUUID: uuid } = require('crypto');
 class PermissionGate extends EventEmitter {
   constructor() {
     super();
-    // Map of requestId → { resolve, reject, request, timeout }
+    
     this._pending = new Map();
     this._history = [];
-    this._defaultTimeoutMs = 300000; // 5 min to approve/reject
+    this._defaultTimeoutMs = 300000; 
   }
 
-  /**
-   * Request permission for an action.
-   * Returns a Promise that resolves when approved, rejects when denied.
-   *
-   * @param {object} request
-   * @param {string} request.type     - 'exec' | 'write' | 'delete' | 'install' | 'git'
-   * @param {string} request.agentId  - which agent is requesting
-   * @param {string} request.description - human-readable description
-   * @param {object} request.payload  - { command?, filePath?, diff? }
-   * @param {boolean} request.autoApprove - bypass gate (for low-risk reads)
-   */
+  
   async request(req) {
     if (req.autoApprove) {
       this._recordHistory({ ...req, status: 'auto-approved', time: Date.now() });
@@ -66,15 +48,11 @@ class PermissionGate extends EventEmitter {
       });
     });
 
-    // Emit so WebSocket can push to UI immediately
     this.emit('pending', permRequest);
 
     return promise;
   }
 
-  /**
-   * Called by UI when user clicks Approve
-   */
   approve(requestId) {
     const entry = this._pending.get(requestId);
     if (!entry) return { ok: false, error: 'Request not found or already resolved' };
@@ -89,9 +67,6 @@ class PermissionGate extends EventEmitter {
     return { ok: true };
   }
 
-  /**
-   * Called by UI when user clicks Reject
-   */
   reject(requestId, reason = 'User rejected') {
     const entry = this._pending.get(requestId);
     if (!entry) return { ok: false, error: 'Request not found or already resolved' };
@@ -121,6 +96,5 @@ class PermissionGate extends EventEmitter {
   }
 }
 
-// Singleton — shared across all modules
 const gate = new PermissionGate();
 module.exports = gate;

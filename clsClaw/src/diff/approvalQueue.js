@@ -1,15 +1,4 @@
-/**
- * approvalQueue.js — Pending change management with conflict detection
- *
- * When an agent proposes a file change:
- *   1. Change is stored as "pending" — NOT written to disk
- *   2. Conflict check: if another pending change targets the same
- *      resolved file path, both are flagged as CONFLICT status
- *      and neither can be approved until one is rejected.
- *   3. UI shows diff + approve/reject buttons
- *   4. Only on approve (when no conflict) → applyDiff() writes to disk
- *   5. On reject → change is discarded, original untouched
- */
+
 
 'use strict';
 
@@ -18,6 +7,10 @@ const { randomUUID: uuid } = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { diffFileVsProposed, applyDiff } = require('../diff/diff');
+const { buildInlineReviewData, reanchorInlineComments } = require('../review/inlineComments');
+const { buildReviewBundle } = require('../review/reviewBundle');
+const { buildEvidenceBundle } = require('../orchestration/evidenceBundle');
+const { buildApprovalContext, classifyEvidenceStatus } = require('../orchestration/autonomyGovernor');
 
 class ApprovalQueue extends EventEmitter {
   constructor(dataDir) {
@@ -29,13 +22,13 @@ class ApprovalQueue extends EventEmitter {
     this._loadHistory();
   }
 
-  // ── Propose ─────────────────────────────────────────────────────────────────
+  
 
-  async propose({ filePath, newContent, agentId, agentName, description, projectRoot, realProjectRoot, worktreePath }) {
+  async propose({ filePath, newContent, agentId, agentName, description, projectRoot, realProjectRoot, worktreePath, evidenceBundle = null, approvalContext = null }) {
     const id = uuid();
 
-    // Resolve to absolute path so conflict detection works across
-    // relative vs absolute proposals targeting the same real file.
+    
+    
     const resolvedPath = path.resolve(filePath);
 
     const diff = diffFileVsProposed(resolvedPath, newContent);
@@ -54,31 +47,42 @@ class ApprovalQueue extends EventEmitter {
       projectRoot:     projectRoot     || path.dirname(resolvedPath),
       realProjectRoot: realProjectRoot || projectRoot || path.dirname(resolvedPath),
       worktreePath:    worktreePath    || null,
+      evidenceBundle:  evidenceBundle  || null,
+      approvalContext: approvalContext || buildApprovalContext({
+        kind: 'file_change',
+        policy: { intent: 'build', mode: 'build', userText: description || `Modify ${path.basename(resolvedPath)}` },
+        deliberation: {
+          approvalSensitive: true,
+          autonomyAllowance: 'bounded',
+          risk: 'medium',
+          needsVerification: true,
+        },
+        evidenceBundle,
+        evidenceStatus: classifyEvidenceStatus(evidenceBundle),
+      }),
       diff,
       status:      'pending',   // 'pending' | 'conflict'
       conflicts:   [],          // ids of other pending changes on the same file
       proposedAt:  Date.now(),
     };
 
-    // ── Conflict detection ───────────────────────────────────────────────────
-    // Scan all existing pending changes for the same resolved file path.
+
     const existingForFile = [...this._pending.values()].filter(
       c => c.filePath === resolvedPath
     );
 
     if (existingForFile.length > 0) {
-      // Mark the new proposal as conflicted
+
       pending.status   = 'conflict';
       pending.conflicts = existingForFile.map(c => c.id);
 
-      // Mark all existing proposals for this file as conflicted too
       for (const existing of existingForFile) {
         if (!existing.conflicts.includes(id)) {
           existing.conflicts.push(id);
         }
         if (existing.status === 'pending') {
           existing.status = 'conflict';
-          // Re-emit so the UI updates the existing card
+
           this.emit('conflict_updated', this._stripContent(existing));
         }
       }
@@ -88,17 +92,40 @@ class ApprovalQueue extends EventEmitter {
     this.emit('proposed', this._stripContent(pending));
     return pending;
   }
-
-  // ── Propose a review item (automation findings — no file write) ─────────────
-
-  /**
-   * Surface automation/skill findings as a reviewable item.
-   * Unlike propose(), this does NOT involve a file diff — it's a
-   * structured findings report the user can acknowledge or dismiss.
-   * Returns the review item id.
-   */
   async proposeReview({ jobId, jobName, skillId, runId, summary, result, projectRoot }) {
     const id = uuid();
+    const reviewData = buildInlineReviewData({ result, projectRoot });
+    const evidenceBundle = buildEvidenceBundle([
+      ...(reviewData.inlineComments || []).map((comment) => ({
+        type: 'workspace',
+        source: comment.file || 'workspace',
+        title: comment.title || comment.file || 'review finding',
+        snippet: comment.body || '',
+      })),
+      ...((result?.findings || []).map((finding) => ({
+        type: 'workspace',
+        source: finding.file || 'workspace',
+        title: finding.issue || finding.title || 'review finding',
+        snippet: `${finding.issue || finding.title || ''}`,
+      }))),
+      ...((result?.sources || []).map((source) => ({
+        type: source.type || 'web',
+        source: source.source || source.url || 'external',
+        title: source.title || source.url || 'external source',
+        snippet: source.snippet || source.url || '',
+      }))),
+    ]);
+    const approvalContext = buildApprovalContext({
+      kind: 'review_acknowledgement',
+      policy: { intent: 'review', mode: 'ask', userText: summary || jobName || 'review findings' },
+      deliberation: {
+        approvalSensitive: true,
+        autonomyAllowance: 'bounded',
+        risk: reviewData.inlineComments.length || (result?.findings || []).length ? 'medium' : 'low',
+        needsVerification: false,
+      },
+      evidenceBundle,
+    });
 
     const review = {
       id,
@@ -108,13 +135,29 @@ class ApprovalQueue extends EventEmitter {
       skillId,
       runId,
       summary,
-      result,
+      result: {
+        ...result,
+        generalFindings: reviewData.generalFindings,
+      },
+      inlineComments: reviewData.inlineComments,
+      evidenceBundle,
+      approvalContext,
+      reviewBundle: buildReviewBundle({
+        summary,
+        result: {
+          ...result,
+          generalFindings: reviewData.generalFindings,
+        },
+        inlineComments: reviewData.inlineComments,
+        evidenceBundle,
+        approvalContext,
+      }),
       projectRoot,
       agentId:    'automation:' + jobId,
       agentName:  jobName + ' (auto)',
       status:     'pending',
       proposedAt: Date.now(),
-      // Reviews have no diff — they have findings
+
       diff:       null,
       filePath:   null,
       newContent: null,
@@ -126,11 +169,29 @@ class ApprovalQueue extends EventEmitter {
     return id;
   }
 
+  updateReviewMetadata(changeId, patch = {}) {
+    const change = this._pending.get(changeId);
+    if (!change || change.type !== 'review') {
+      return { ok: false, error: 'Review item not found' };
+    }
+    Object.assign(change, patch);
+    change.reviewBundle = buildReviewBundle({
+      summary: change.summary,
+      result: change.result,
+      inlineComments: change.inlineComments,
+      evidenceBundle: change.evidenceBundle,
+      approvalContext: change.approvalContext,
+      githubReview: change.githubReview,
+    });
+    change.updatedAt = Date.now();
+    this.emit('updated', this._prepareChangeForRead(change));
+    return { ok: true, change: this._prepareChangeForRead(change) };
+  }
+
   async approve(changeId) {
     const change = this._pending.get(changeId);
     if (!change) return { ok: false, error: 'Change not found' };
 
-    // Review items (automation findings) are acknowledged, not written to disk
     if (change.type === 'review') {
       change.status     = 'acknowledged';
       change.resolvedAt = Date.now();
@@ -140,7 +201,6 @@ class ApprovalQueue extends EventEmitter {
       return { ok: true, acknowledged: true };
     }
 
-    // Block approval if conflict is unresolved
     const activeConflicts = change.conflicts.filter(id => this._pending.has(id));
     if (change.status === 'conflict' && activeConflicts.length > 0) {
       return {
@@ -170,7 +230,6 @@ class ApprovalQueue extends EventEmitter {
     }
   }
 
-  // ── Reject ──────────────────────────────────────────────────────────────────
 
   reject(changeId, reason = 'User rejected') {
     const change = this._pending.get(changeId);
@@ -181,7 +240,6 @@ class ApprovalQueue extends EventEmitter {
     change.resolvedAt = Date.now();
     this._pending.delete(changeId);
 
-    // Removing this change might resolve conflicts for others
     this._cleanupConflictRefs(changeId);
 
     this._recordHistory(change);
@@ -189,7 +247,6 @@ class ApprovalQueue extends EventEmitter {
     return { ok: true };
   }
 
-  // ── Edit + approve ───────────────────────────────────────────────────────────
 
   async editAndApprove(changeId, editedContent) {
     const change = this._pending.get(changeId);
@@ -199,11 +256,10 @@ class ApprovalQueue extends EventEmitter {
     return this.approve(changeId);
   }
 
-  // ── Conflict cleanup ─────────────────────────────────────────────────────────
 
   _cleanupConflictRefs(removedId) {
-    // Remove the resolved/rejected id from all other pending changes' conflict lists.
-    // If a change had only this one conflict, clear its conflict status.
+
+
     for (const [, change] of this._pending) {
       const idx = change.conflicts.indexOf(removedId);
       if (idx !== -1) {
@@ -216,14 +272,14 @@ class ApprovalQueue extends EventEmitter {
     }
   }
 
-  // ── Getters ──────────────────────────────────────────────────────────────────
 
   getPending() {
-    return [...this._pending.values()].map(c => this._stripContent(c));
+    return [...this._pending.values()].map((change) => this._prepareChangeForRead(change));
   }
 
   getPendingById(id) {
-    return this._pending.get(id) || null;
+    const change = this._pending.get(id) || null;
+    return change ? this._prepareChangeForRead(change) : null;
   }
 
   getHistory(limit = 100) {
@@ -238,11 +294,28 @@ class ApprovalQueue extends EventEmitter {
       .reverse();
   }
 
-  // ── Internals ─────────────────────────────────────────────────────────────────
 
   _stripContent(c) {
     const { newContent, ...rest } = c;
     return rest;
+  }
+
+  _prepareChangeForRead(change) {
+    const base = this._stripContent(change);
+    if (change.type !== 'review') return base;
+    const inlineComments = reanchorInlineComments(change.inlineComments || [], change.projectRoot);
+    return {
+      ...base,
+      inlineComments,
+      reviewBundle: buildReviewBundle({
+        summary: change.summary,
+        result: change.result,
+        inlineComments,
+        evidenceBundle: change.evidenceBundle,
+        approvalContext: change.approvalContext,
+        githubReview: change.githubReview,
+      }),
+    };
   }
 
   _recordHistory(change) {
@@ -258,6 +331,8 @@ class ApprovalQueue extends EventEmitter {
       resolvedAt:     change.resolvedAt,
       worktreePath:   change.worktreePath,
       stats:          change.diff?.stats,
+      approvalContext: change.approvalContext || null,
+      reviewBundle: change.reviewBundle || null,
     });
     if (this._history.length > 1000) this._history.shift();
     this._saveHistory();
@@ -270,7 +345,7 @@ class ApprovalQueue extends EventEmitter {
         JSON.stringify(this._history.slice(-200)),
         'utf-8'
       );
-    } catch { /* non-fatal */ }
+    } catch {}
   }
 
   _loadHistory() {

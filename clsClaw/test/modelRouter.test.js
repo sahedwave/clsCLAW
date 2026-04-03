@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { resolveKeys, routeProviders } = require('../src/llm/modelRouter');
+const { resolveKeys, routeProviders, normalizeInputMessages, hasImageInputs } = require('../src/llm/modelRouter');
 
 test('resolveKeys supports multi-provider objects including local model settings', () => {
   const resolved = resolveKeys({
@@ -40,4 +40,27 @@ test('routeProviders keeps role-specific fallback order stable', () => {
   assert.deepEqual(routeProviders('docs'), ['local', 'openai', 'claude']);
   assert.deepEqual(routeProviders('test'), ['openai', 'claude']);
   assert.deepEqual(routeProviders('code'), ['claude', 'openai', 'local']);
+});
+
+test('routeProviders prefers multimodal providers when images are attached', () => {
+  assert.deepEqual(routeProviders('code', { hasImages: true }), ['openai', 'claude']);
+  assert.deepEqual(routeProviders('analyze', { hasImages: true }), ['openai', 'claude']);
+});
+
+test('normalizeInputMessages preserves structured text and image parts', () => {
+  const messages = normalizeInputMessages({
+    system: 'system prompt',
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'inspect this screenshot' },
+        { type: 'image', dataUrl: 'data:image/png;base64,AAAA', mimeType: 'image/png', name: 'screen.png' },
+      ],
+    }],
+  });
+
+  assert.equal(messages[0].role, 'system');
+  assert.equal(messages[1].content[1].type, 'image');
+  assert.equal(messages[1].content[1].name, 'screen.png');
+  assert.equal(hasImageInputs(messages), true);
 });

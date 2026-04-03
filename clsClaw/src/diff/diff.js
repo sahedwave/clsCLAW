@@ -8,7 +8,7 @@ const path = require('path');
 
 const execAsync = promisify(exec);
 
-// Lazily initialised — server.js calls setVersionStore() after constructing VersionStore
+
 let _versionStore = null;
 function setVersionStore(vs) { _versionStore = vs; }
 
@@ -49,22 +49,19 @@ async function gitDiff(filePath, projectRoot) {
 async function applyDiff(filePath, newContent, projectRoot, { agentId, agentName, description, stats } = {}) {
   const resolved = path.resolve(filePath);
 
-  // Snapshot the BEFORE state (replaces scattered .codex-bak.* files)
   if (_versionStore) {
     _versionStore.snapshotBefore(resolved, { agentId, agentName, description, stats });
   } else {
-    // Fallback if versionStore not yet wired
+
     if (fs.existsSync(resolved)) {
-      fs.copyFileSync(resolved, resolved + '.codex-bak.' + Date.now());
+      fs.copyFileSync(resolved, resolved + '.closeclaw-bak.' + Date.now());
     }
   }
 
-  // Write new content
   const dir = path.dirname(resolved);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(resolved, newContent, 'utf-8');
 
-  // Snapshot the AFTER state so every written version is browsable
   if (_versionStore) {
     _versionStore.snapshotContent(resolved, newContent, {
       agentId,
@@ -74,13 +71,12 @@ async function applyDiff(filePath, newContent, projectRoot, { agentId, agentName
     });
   }
 
-  // git add if inside a repo
   try {
     await execAsync(
       `git add "${path.relative(projectRoot, resolved)}"`,
       { cwd: projectRoot, timeout: 5000 }
     );
-  } catch { /* not a git repo — fine */ }
+  } catch {}
 
   return { ok: true, filePath: resolved };
 }

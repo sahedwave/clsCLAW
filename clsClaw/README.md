@@ -45,7 +45,7 @@ node --test
 ### Approval workflow (`src/diff/approvalQueue.js`)
 - Every file change proposed by an agent is stored in memory as a **pending change**.
 - Nothing writes to disk until you click **Approve** in the Diff panel.
-- On approve: file is written, original backed up as `.codex-bak.<timestamp>`, `git add` called if in a repo.
+- On approve: file is written, original backed up as `.closeclaw-bak.<timestamp>`, `git add` called if in a repo.
 - On reject: no disk change, record kept in history.
 
 ### Diff viewer (`src/diff/diff.js` + `src/diff/lineDiff.js`)
@@ -65,7 +65,7 @@ node --test
 - Full history of approved/rejected actions.
 
 ### Git worktrees (`src/worktrees/worktrees.js`)
-- Real `git worktree add -b codex/agent-<name>-<id>` per agent.
+- Real `git worktree add -b closeclaw/agent-<name>-<id>` per agent.
 - Agents write to their own branch — no conflict with your working tree.
 - Merge (normal/squash/rebase), diff, and remove from the Worktrees panel.
 - Requires the project to be a git repository.

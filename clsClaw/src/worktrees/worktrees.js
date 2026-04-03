@@ -1,15 +1,4 @@
-/**
- * worktrees.js — Git worktree management
- *
- * Each agent gets its own git worktree (isolated working directory
- * on a separate branch). This means:
- *   - Agent A's changes never touch Agent B's files
- *   - Changes can be reviewed as a proper git branch
- *   - User can merge, rebase, or discard cleanly
- *
- * Requires: project must be a git repository.
- * If not a git repo → returns error, graceful degradation.
- */
+
 
 'use strict';
 
@@ -34,27 +23,23 @@ async function getCurrentBranch(projectRoot) {
   } catch { return 'main'; }
 }
 
-/**
- * Create a git worktree for an agent.
- * Returns the path to the worktree directory.
- */
+
 async function createWorktree(projectRoot, agentId, agentName) {
   if (!(await isGitRepo(projectRoot))) {
     return { ok: false, error: 'Project is not a git repository. Run `git init` first.' };
   }
 
   const safeName = agentName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30);
-  const branchName = `codex/agent-${safeName}-${agentId.slice(0, 8)}`;
-  const worktreeDir = path.join(projectRoot, '.codex-worktrees', agentId);
+  const branchName = `closeclaw/agent-${safeName}-${agentId.slice(0, 8)}`;
+  const worktreeDir = path.join(projectRoot, '.closeclaw-worktrees', agentId);
 
   try {
-    // Ensure the worktrees container exists
-    const wtParent = path.join(projectRoot, '.codex-worktrees');
+
+    const wtParent = path.join(projectRoot, '.closeclaw-worktrees');
     if (!fs.existsSync(wtParent)) fs.mkdirSync(wtParent, { recursive: true });
 
-    // Add to .gitignore
     const gitignore = path.join(projectRoot, '.gitignore');
-    const ignoreEntry = '.codex-worktrees/';
+    const ignoreEntry = '.closeclaw-worktrees/';
     if (fs.existsSync(gitignore)) {
       const content = fs.readFileSync(gitignore, 'utf-8');
       if (!content.includes(ignoreEntry)) {
@@ -64,7 +49,6 @@ async function createWorktree(projectRoot, agentId, agentName) {
       fs.writeFileSync(gitignore, ignoreEntry + '\n');
     }
 
-    // Create branch and worktree
     await execAsync(
       `git worktree add -b "${branchName}" "${worktreeDir}"`,
       { cwd: projectRoot, timeout: 15000 }
@@ -77,15 +61,12 @@ async function createWorktree(projectRoot, agentId, agentName) {
       agentId,
     };
   } catch (err) {
-    // Cleanup if partial
+
     try { fs.rmSync(worktreeDir, { recursive: true, force: true }); } catch {}
     return { ok: false, error: err.message };
   }
 }
 
-/**
- * Remove a worktree after agent is done (or cancelled).
- */
 async function removeWorktree(projectRoot, worktreePath) {
   try {
     await execAsync(
@@ -94,15 +75,12 @@ async function removeWorktree(projectRoot, worktreePath) {
     );
     return { ok: true };
   } catch (err) {
-    // Force remove directory if git command fails
+
     try { fs.rmSync(worktreePath, { recursive: true, force: true }); } catch {}
     return { ok: false, error: err.message };
   }
 }
 
-/**
- * List all active worktrees.
- */
 async function listWorktrees(projectRoot) {
   try {
     const { stdout } = await execAsync('git worktree list --porcelain', { cwd: projectRoot, timeout: 5000 });
@@ -125,9 +103,6 @@ async function listWorktrees(projectRoot) {
   }
 }
 
-/**
- * Merge a worktree branch back into the main branch.
- */
 async function mergeWorktree(projectRoot, branchName, strategy = 'merge') {
   try {
     const mainBranch = await getCurrentBranch(projectRoot);
@@ -147,9 +122,6 @@ async function mergeWorktree(projectRoot, branchName, strategy = 'merge') {
   }
 }
 
-/**
- * Get diff of a worktree branch vs main.
- */
 async function getWorktreeDiff(projectRoot, branchName) {
   try {
     const mainBranch = await getCurrentBranch(projectRoot);

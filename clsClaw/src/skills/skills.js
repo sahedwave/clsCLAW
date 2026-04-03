@@ -1,13 +1,4 @@
-/**
- * skills.js — Executable skill modules
- *
- * Each skill has:
- *   - id, name, category
- *   - execute(projectRoot, contextEngine, sandbox) → runs real logic
- *   - Produces a structured result (findings, commands run, output)
- *
- * NOT prompt templates. These run actual analysis.
- */
+
 
 'use strict';
 
@@ -17,8 +8,12 @@ const fs = require('fs');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
+const {
+  readIdentityFiles,
+  ensureIdentityFiles,
+} = require('../workspaceIdentity');
 
-// ── Individual skill implementations ─────────────────────────────────────────
+
 
 const SKILLS = [
 
@@ -50,7 +45,7 @@ const SKILLS = [
           for (const { re, label } of PATTERNS) {
             const matches = content.match(re);
             if (matches) {
-              // Find line numbers
+              
               const lines = content.split('\n');
               const lineNos = [];
               lines.forEach((line, i) => {
@@ -61,10 +56,10 @@ const SKILLS = [
             }
             re.lastIndex = 0;
           }
-        } catch { /* skip */ }
+        } catch {  }
       }
 
-      // Also try npm audit if package.json exists
+      
       let npmAudit = null;
       if (fs.existsSync(path.join(projectRoot, 'package.json'))) {
         try {
@@ -81,6 +76,55 @@ const SKILLS = [
         summary: `Found ${findings.length} potential security issues across ${files.length} files`,
       };
     }
+  },
+
+  {
+    id: 'heartbeat-review',
+    name: 'Heartbeat review',
+    icon: '💓',
+    category: 'inspect',
+    description: 'Review HEARTBEAT.md and identity files for unattended follow-up',
+    async execute(projectRoot) {
+      const before = readIdentityFiles(projectRoot, { includeContent: true });
+      const missingIdentity = before.filter((file) => !file.exists).map((file) => file.name);
+      if (missingIdentity.length > 0) ensureIdentityFiles(projectRoot, missingIdentity);
+      const files = readIdentityFiles(projectRoot, { includeContent: true });
+      const heartbeat = files.find((file) => file.name === 'HEARTBEAT.md');
+      const pendingTasks = [];
+
+      for (const line of String(heartbeat?.content || '').split('\n')) {
+        const match = line.match(/^- \[ \]\s+(.+)$/);
+        if (match) pendingTasks.push(match[1].trim());
+      }
+      const findings = [];
+
+      if (missingIdentity.length > 0) {
+        findings.push({
+          file: 'workspace',
+          issue: 'Missing identity files',
+          occurrences: missingIdentity.length,
+          lines: [],
+          detail: missingIdentity.join(', '),
+        });
+      }
+
+      for (const task of pendingTasks) {
+        findings.push({
+          file: 'HEARTBEAT.md',
+          issue: task,
+          occurrences: 1,
+          lines: [],
+        });
+      }
+
+      return {
+        skill: 'heartbeat-review',
+        findings,
+        summary: pendingTasks.length
+          ? `Heartbeat found ${pendingTasks.length} outstanding task(s)`
+          : 'Heartbeat check completed with no open checklist items',
+      };
+    },
   },
 
   {
@@ -116,7 +160,7 @@ const SKILLS = [
     category: 'inspect',
     description: 'Run ESLint or pylint on the project',
     async execute(projectRoot) {
-      // Detect linter
+
       let lintCmd = null;
       if (fs.existsSync(path.join(projectRoot, '.eslintrc.js')) ||
           fs.existsSync(path.join(projectRoot, '.eslintrc.json')) ||
@@ -181,7 +225,7 @@ const SKILLS = [
           stats.totalFiles++;
           stats.totalLines += lines;
           stats.totalSize += size;
-        } catch { /* skip */ }
+        } catch {}
       }
       return { skill: 'file-stats', stats };
     }
@@ -210,7 +254,6 @@ const SKILLS = [
     }
   },
 
-  // ── GAP 6: write-tests ───────────────────────────────────────────────────────
   {
     id: 'write-tests',
     name: 'Write tests',
@@ -218,17 +261,16 @@ const SKILLS = [
     category: 'build',
     description: 'Detect test framework, extract exported functions, generate real test files',
     async execute(projectRoot) {
-      // 1. Detect framework
+
       const framework = detectTestFramework(projectRoot);
       if (!framework) {
         return { skill: 'write-tests', ok: false, error: 'No test framework detected. Install jest, mocha, or pytest first.' };
       }
 
-      // 2. Find source files that lack corresponding test files
       const sourceFiles = walkForAudit(projectRoot).filter(f => {
         const ext = path.extname(f);
         const rel = path.relative(projectRoot, f);
-        // Skip existing test files
+
         if (/\.(test|spec)\.[jt]sx?$/.test(f)) return false;
         if (rel.includes('__tests__') || rel.includes('/test/') || rel.includes('/tests/')) return false;
         return ['.js', '.ts', '.jsx', '.tsx', '.py'].includes(ext);
@@ -243,11 +285,9 @@ const SKILLS = [
           const ext = path.extname(srcFile);
           const isPy  = ext === '.py';
 
-          // Extract symbols from this file
           const symbols = extractSymbols(content, ext);
           if (symbols.length === 0) { skipped.push(path.relative(projectRoot, srcFile)); continue; }
 
-          // Generate test file path
           const testPath = isPy
             ? path.join(path.dirname(srcFile), 'test_' + path.basename(srcFile))
             : path.join(
@@ -255,7 +295,6 @@ const SKILLS = [
                 path.basename(srcFile, ext) + '.test' + ext
               );
 
-          // Don't overwrite existing test files
           if (fs.existsSync(testPath)) { skipped.push(path.relative(projectRoot, testPath) + ' (exists)'); continue; }
 
           const relSrc = path.relative(projectRoot, srcFile);
@@ -282,7 +321,6 @@ const SKILLS = [
     }
   },
 
-  // ── GAP 6: generate-docs ─────────────────────────────────────────────────────
   {
     id: 'generate-docs',
     name: 'Generate docs',
@@ -292,7 +330,6 @@ const SKILLS = [
     async execute(projectRoot) {
       const fileProposals = [];
 
-      // 1. Generate / update README.md
       const readmePath = path.join(projectRoot, 'README.md');
       const readmeContent = generateReadme(projectRoot);
       fileProposals.push({
@@ -301,7 +338,6 @@ const SKILLS = [
         description: 'Generated README.md from project structure',
       });
 
-      // 2. Add JSDoc to undocumented JS/TS functions
       const jsFiles = walkForAudit(projectRoot).filter(f =>
         ['.js', '.ts', '.jsx', '.tsx'].includes(path.extname(f)) &&
         !f.includes('node_modules') && !f.includes('.test.') && !f.includes('.spec.')
@@ -321,7 +357,6 @@ const SKILLS = [
         } catch {}
       }
 
-      // 3. Add docstrings to undocumented Python functions
       const pyFiles = walkForAudit(projectRoot).filter(f =>
         path.extname(f) === '.py' && !f.includes('test_')
       ).slice(0, 10);
@@ -349,7 +384,6 @@ const SKILLS = [
     }
   },
 
-  // ── GAP 6: migrate ───────────────────────────────────────────────────────────
   {
     id: 'migrate',
     name: 'Migrate & modernise',
@@ -385,7 +419,6 @@ const SKILLS = [
         } catch {}
       }
 
-      // Python: modernise print statements, old-style string formatting
       const pyFiles = walkForAudit(projectRoot).filter(f =>
         path.extname(f) === '.py' && !f.includes('test_')
       ).slice(0, 15);
@@ -421,9 +454,8 @@ const SKILLS = [
 
 ];
 
-// ── Walk helper (reused across skills) ───────────────────────────────────────
 
-const IGNORE_DIRS = new Set(['node_modules', '.git', '__pycache__', 'dist', 'build', '.codex-worktrees']);
+const IGNORE_DIRS = new Set(['node_modules', '.git', '__pycache__', 'dist', 'build', '.closeclaw-worktrees']);
 const AUDIT_EXTS  = new Set(['.js', '.ts', '.jsx', '.tsx', '.py', '.rb', '.php', '.go', '.rs', '.java', '.cs']);
 
 function walkForAudit(dir, depth = 0) {
@@ -440,7 +472,6 @@ function walkForAudit(dir, depth = 0) {
   return results.slice(0, 200);
 }
 
-// ── write-tests helpers ───────────────────────────────────────────────────────
 
 function detectTestFramework(projectRoot) {
   const pkgPath = path.join(projectRoot, 'package.json');
@@ -468,7 +499,7 @@ function extractSymbols(content, ext) {
   const isPy = ext === '.py';
 
   if (isPy) {
-    // Python: def functionName(
+
     const re = /^def\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)/gm;
     let m;
     while ((m = re.exec(content)) !== null) {
@@ -476,18 +507,18 @@ function extractSymbols(content, ext) {
         symbols.push({ name: m[1], params: m[2].split(',').map(p => p.trim().split(':')[0].trim()).filter(Boolean), type: 'function' });
       }
     }
-    // Python: class ClassName
+
     const classRe = /^class\s+([A-Z]\w*)/gm;
     while ((m = classRe.exec(content)) !== null) {
       symbols.push({ name: m[1], params: [], type: 'class' });
     }
   } else {
-    // JS/TS: export function name( or export const name = (
+
     const patterns = [
       /export\s+(?:default\s+)?(?:async\s+)?function\s+([a-zA-Z_$]\w*)\s*\(([^)]*)\)/g,
       /export\s+const\s+([a-zA-Z_$]\w*)\s*=\s*(?:async\s*)?\(([^)]*)\)/g,
       /export\s+const\s+([a-zA-Z_$]\w*)\s*=\s*(?:async\s+)?function\s*\(([^)]*)\)/g,
-      // Also non-exported for completeness
+
       /^(?:async\s+)?function\s+([a-zA-Z_$]\w*)\s*\(([^)]*)\)/gm,
       /^const\s+([a-zA-Z_$]\w*)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/gm,
     ];
@@ -502,7 +533,7 @@ function extractSymbols(content, ext) {
         }
       }
     }
-    // Classes
+
     const classRe = /(?:export\s+)?class\s+([A-Z]\w*)/g;
     let m;
     while ((m = classRe.exec(content)) !== null) {
@@ -545,20 +576,20 @@ function generateJestFile(relSrcPath, symbols, framework, ext) {
 
     it('should return a value when called with valid arguments', () => {
       const result = ${sym.name}(${args});
-      // TODO: replace with specific assertion
+      
       expect(result).toBeDefined();
     });
 
     it('should handle edge cases', () => {
-      // TODO: add edge case tests
+      
       expect(() => ${sym.name}(${args})).not.toThrow();
     });
   });`;
   }).join('\n\n');
 
-  return `// SAVE_AS: ${relSrcPath.replace(/\.(js|ts|jsx|tsx)$/, '.test.$1')}
-// Auto-generated by Codex write-tests skill
-// Review and customise each test case before running
+  return `
+
+
 
 ${importLine}
 
@@ -603,7 +634,7 @@ def test_${sym.name}_edge_cases():
   }).join('\n\n');
 
   return `# SAVE_AS: ${path.dirname(relSrcPath)}/test_${path.basename(relSrcPath)}
-# Auto-generated by Codex write-tests skill
+# Auto-generated by closeCLAW write-tests skill
 # Review and customise each test before running
 
 import pytest
@@ -614,7 +645,6 @@ ${testFunctions}
 `;
 }
 
-// ── generate-docs helpers ─────────────────────────────────────────────────────
 
 function generateReadme(projectRoot) {
   let name = path.basename(projectRoot);
@@ -623,7 +653,6 @@ function generateReadme(projectRoot) {
   let scripts = {};
   let hasTests = false;
 
-  // Read package.json
   const pkgPath = path.join(projectRoot, 'package.json');
   if (fs.existsSync(pkgPath)) {
     try {
@@ -642,11 +671,9 @@ function generateReadme(projectRoot) {
     } catch {}
   }
 
-  // Detect Python
   if (fs.existsSync(path.join(projectRoot, 'requirements.txt'))) stack.push('Python');
   if (fs.existsSync(path.join(projectRoot, 'pytest.ini')))        hasTests = true;
 
-  // Count files by type
   const files = walkForAudit(projectRoot);
   const byExt = {};
   for (const f of files) {
@@ -688,12 +715,12 @@ npm start
 
 ${scriptSection}${stackSection}${fileSection}${testSection}
 ---
-_README generated by Codex generate-docs skill on ${new Date().toISOString().slice(0,10)}_
+_README generated by closeCLAW generate-docs skill on ${new Date().toISOString().slice(0,10)}_
 `;
 }
 
 function addJsDocComments(content) {
-  // Find functions that don't have a JSDoc comment above them
+
   const lines = content.split('\n');
   const output = [];
   let i = 0;
@@ -701,13 +728,12 @@ function addJsDocComments(content) {
   while (i < lines.length) {
     const line = lines[i];
 
-    // Look for function declarations not preceded by /** */
     const funcMatch = line.match(/^(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$]\w*)\s*\(([^)]*)\)/);
     const arrowMatch = line.match(/^(?:export\s+)?const\s+([a-zA-Z_$]\w*)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/);
 
     const match = funcMatch || arrowMatch;
     if (match) {
-      // Check if preceding line is already a JSDoc comment end
+
       const prevLine = output[output.length - 1] || '';
       const prevPrev = output[output.length - 2] || '';
       const hasJsDoc = prevLine.trim() === '*/' || prevLine.trim().startsWith('*') || prevPrev.trim() === '*/';
@@ -720,11 +746,7 @@ function addJsDocComments(content) {
 
         const paramLines = params.map(p => `${indent} * @param {*} ${p}`).join('\n');
         const jsdoc = [
-          `${indent}/**`,
-          `${indent} * ${funcName}`,
-          ...(params.length > 0 ? [paramLines] : []),
-          `${indent} * @returns {*}`,
-          `${indent} */`,
+          `${indent}`,
         ].join('\n');
 
         output.push(jsdoc);
@@ -739,7 +761,7 @@ function addJsDocComments(content) {
 }
 
 function addPythonDocstrings(content) {
-  // Add docstrings to functions that don't have them
+
   const lines  = content.split('\n');
   const output = [];
   let i = 0;
@@ -775,21 +797,19 @@ function addPythonDocstrings(content) {
   return output.join('\n');
 }
 
-// ── migrate helpers ───────────────────────────────────────────────────────────
 
 function migrateJs(content, filePath) {
-  // Skip if it looks like a module that uses require() for a reason (e.g. server.js patterns)
+
   const isCommonJs = content.includes('module.exports');
 
   let result  = content;
   const changes = [];
 
-  // 1. var → const/let (only safe cases — single assignment, no re-assignment)
   const varLines = result.split('\n');
   const varConverted = varLines.map(line => {
-    // Only convert simple `var x = ` at statement level (not inside for loops)
+
     if (/^\s*var\s+[a-zA-Z_$]/.test(line) && !/for\s*\(/.test(line)) {
-      // Use const if it looks like it won't be reassigned (heuristic: ends with semicolon or comma)
+
       return line.replace(/^(\s*)var\s+/, '$1const ');
     }
     return line;
@@ -801,18 +821,16 @@ function migrateJs(content, filePath) {
     result = varResult;
   }
 
-  // 2. Callback patterns → promise-style (only very simple fs.readFile / setTimeout)
-  // Simple: setTimeout(fn, 0) → setTimeout(fn, 0) with comment suggesting Promise
+
   if (/new Promise\s*\(/.test(content) === false && /callback/.test(content)) {
-    // Add a comment suggesting Promise migration (non-invasive)
+
     result = result.replace(
       /\/\/ TODO.*callback.*promise/gi,
       '// TODO: consider migrating callbacks to async/await'
     );
   }
 
-  // 3. String concatenation → template literals (simple cases)
-  // Only where it's clearly: "string" + variable + "string"
+
   const beforeTpl = result;
   result = result.replace(
     /'([^'\\]*)'\s*\+\s*([a-zA-Z_$]\w*(?:\.[a-zA-Z_$]\w*)*)\s*\+\s*'([^'\\]*)'/g,
@@ -823,10 +841,9 @@ function migrateJs(content, filePath) {
     changes.push(`${count} string concat→template literal`);
   }
 
-  // 4. == → === (only where it's not == null which is intentional)
   const beforeEq = result;
   result = result.replace(/([^=!<>])([^=!<>])==([^=])/g, (m, a, b, c) => {
-    // Don't touch == null, == undefined
+
     if (c.trim().startsWith('null') || c.trim().startsWith('undefined')) return m;
     return `${a}${b}===${c}`;
   });
@@ -834,7 +851,6 @@ function migrateJs(content, filePath) {
     changes.push('== → ===');
   }
 
-  // 5. console.log removal suggestions in production files
   if (!filePath.includes('test') && !filePath.includes('debug') && (content.match(/console\.log/g)||[]).length > 3) {
     changes.push(`${(content.match(/console\.log/g)||[]).length} console.log calls (consider removing in production)`);
   }
@@ -846,12 +862,11 @@ function migratePy(content) {
   let result  = content;
   const changes = [];
 
-  // 1. Old-style % string formatting → f-strings (simple cases)
   const beforeFmt = result;
   result = result.replace(
     /"([^"]*?)"\s*%\s*\(([^)]+)\)/g,
     (_, template, args) => {
-      // Only handle simple %s, %d patterns
+
       const parts = args.split(',').map(a => a.trim());
       let i = 0;
       const converted = template.replace(/%[sd]/g, () => `{${parts[i++] || '?'}}`);
@@ -862,7 +877,6 @@ function migratePy(content) {
     changes.push('%-style string formatting → f-strings');
   }
 
-  // 2. Old print statement (Python 2) → print function
   const beforePrint = result;
   result = result.replace(/^(\s*)print\s+(?![(])(.+)$/gm, (_, indent, args) => {
     return `${indent}print(${args.trim()})`;
@@ -871,14 +885,12 @@ function migratePy(content) {
     changes.push('print statement → print()');
   }
 
-  // 3. except Exception, e → except Exception as e
   const beforeExcept = result;
   result = result.replace(/except\s+(\w+)\s*,\s*(\w+)\s*:/g, 'except $1 as $2:');
   if (result !== beforeExcept) {
     changes.push('except X, e → except X as e');
   }
 
-  // 4. xrange → range
   const beforeRange = result;
   result = result.replace(/\bxrange\s*\(/g, 'range(');
   if (result !== beforeRange) {
@@ -888,22 +900,30 @@ function migratePy(content) {
   return { content: result, changed: changes.length > 0, changes };
 }
 
-// ── Registry ──────────────────────────────────────────────────────────────────
 
 class SkillRegistry {
   constructor() {
     this._skills = new Map(SKILLS.map(s => [s.id, s]));
+    this._extensionManager = null;
+  }
+
+  setExtensionManager(extensionManager) {
+    this._extensionManager = extensionManager;
   }
 
   list() {
-    return SKILLS.map(({ id, name, icon, category, description }) => ({ id, name, icon, category, description }));
+    const core = SKILLS.map(({ id, name, icon, category, description }) => ({
+      id, name, icon, category, description, source: 'core', pluginId: null, pluginName: null,
+    }));
+    const installed = this._extensionManager ? this._extensionManager.listInstalledSkills() : [];
+    return [...core, ...installed];
   }
 
   get(id) {
     return this._skills.get(id) || null;
   }
 
-  async run(skillId, projectRoot) {
+  async runCore(skillId, projectRoot) {
     const skill = this.get(skillId);
     if (!skill) throw new Error(`Unknown skill: ${skillId}`);
     const startTime = Date.now();
@@ -913,6 +933,17 @@ class SkillRegistry {
     } catch (err) {
       return { skill: skillId, error: err.message, ok: false, durationMs: Date.now() - startTime };
     }
+  }
+
+  async run(skillId, projectRoot) {
+    const skill = this.get(skillId);
+    if (skill) {
+      return this.runCore(skillId, projectRoot);
+    }
+    if (this._extensionManager?.getSkill(skillId)) {
+      return this._extensionManager.runSkill(skillId, projectRoot);
+    }
+    throw new Error(`Unknown skill: ${skillId}`);
   }
 }
 

@@ -1,7 +1,4 @@
-/**
- * sse.js — Server-Sent Events broadcast (replaces WebSocket)
- * No external deps. Works in all browsers natively.
- */
+
 'use strict';
 
 class SSEBroadcaster {

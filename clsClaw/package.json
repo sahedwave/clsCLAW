@@ -1,7 +1,7 @@
 {
-  "name": "codex-local-v4",
+  "name": "closeclaw-local-v4",
   "version": "4.0.0",
-  "description": "Real Codex-like local agent — zero external dependencies",
+  "description": "Real closeCLAW-style local agent — zero external dependencies",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

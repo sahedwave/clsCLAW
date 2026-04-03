@@ -1,7 +1,4 @@
-/**
- * cronLite.js — minimal cron-like scheduler, no npm deps.
- * Supports standard 5-field cron: min hour day month weekday
- */
+
 'use strict';
 
 function parseCron(expr) {
@@ -11,7 +8,7 @@ function parseCron(expr) {
 }
 
 function parseField(field) {
-  if (field === '*') return null; // any
+  if (field === '*') return null; 
   if (field.includes('/')) {
     const [, step] = field.split('/');
     return { step: parseInt(step) };
@@ -55,7 +52,7 @@ class CronTask {
   start() {
     if (this.scheduled) return;
     this.scheduled = true;
-    // Check every 30 seconds, fire when cron matches
+    
     this._handle = setInterval(() => {
       if (shouldRun(this.expr, new Date())) this.fn().catch(()=>{});
     }, 30000);

@@ -51,6 +51,18 @@ function resolveKeys(apiKey) {
 }
 
 function routeProviders(role) {
+  const options = arguments[1] || {};
+  if (options.hasImages) {
+    switch (role) {
+      case 'test':
+      case 'docs':
+      case 'analyze':
+      case 'code':
+      case 'review':
+      default:
+        return ['openai', 'claude'];
+    }
+  }
   switch (role) {
     case 'test':
       return ['openai', 'claude'];
@@ -79,11 +91,136 @@ async function readSseStream(stream, onEvent) {
   }
 }
 
-async function callClaude({ system, prompt, stream, onToken, keys }) {
+function normalizeInputMessages({ system = '', prompt, messages = null }) {
+  const normalized = [];
+  if (system) {
+    normalized.push({
+      role: 'system',
+      content: [{ type: 'text', text: String(system) }],
+    });
+  }
+  const sourceMessages = Array.isArray(messages) && messages.length
+    ? messages
+    : [{ role: 'user', content: prompt }];
+  for (const message of sourceMessages) {
+    normalized.push({
+      role: message?.role || 'user',
+      content: normalizeContentParts(message?.content),
+    });
+  }
+  return normalized;
+}
+
+function normalizeContentParts(content) {
+  if (Array.isArray(content)) {
+    return content.flatMap((part) => {
+      if (!part) return [];
+      if (part.type === 'text') {
+        return [{ type: 'text', text: String(part.text || '') }];
+      }
+      if (part.type === 'image' && part.dataUrl) {
+        return [{
+          type: 'image',
+          dataUrl: String(part.dataUrl),
+          mimeType: String(part.mimeType || mimeTypeFromDataUrl(part.dataUrl)),
+          name: String(part.name || ''),
+        }];
+      }
+      return [];
+    });
+  }
+  return [{ type: 'text', text: String(content || '') }];
+}
+
+function hasImageInputs(messages = []) {
+  return normalizeInputMessages({ messages }).some((message) =>
+    message.content.some((part) => part.type === 'image')
+  );
+}
+
+function toAnthropicMessages(messages = []) {
+  return messages
+    .filter((message) => message.role !== 'system')
+    .map((message) => ({
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: message.content.map((part) => {
+        if (part.type === 'image') {
+          const { mimeType, base64 } = parseDataUrl(part.dataUrl);
+          return {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: mimeType,
+              data: base64,
+            },
+          };
+        }
+        return { type: 'text', text: String(part.text || '') };
+      }),
+    }));
+}
+
+function toOpenAIMessages(messages = []) {
+  return messages.map((message) => {
+    const mapped = message.content.map((part) => {
+      if (part.type === 'image') {
+        return {
+          type: 'image_url',
+          image_url: {
+            url: part.dataUrl,
+          },
+        };
+      }
+      return {
+        type: 'text',
+        text: String(part.text || ''),
+      };
+    });
+    const textOnly = mapped.every((part) => part.type === 'text');
+    return {
+      role: message.role,
+      content: textOnly ? mapped.map((part) => part.text).join('\n') : mapped,
+    };
+  });
+}
+
+function flattenForLocal(messages = []) {
+  return messages.map((message) => {
+    const parts = message.content.map((part) => {
+      if (part.type === 'image') {
+        return `[image: ${part.name || 'attachment'}]`;
+      }
+      return String(part.text || '');
+    }).filter(Boolean).join('\n');
+    return `${String(message.role || 'user').toUpperCase()}:\n${parts}`;
+  }).join('\n\n');
+}
+
+function parseDataUrl(dataUrl) {
+  const match = String(dataUrl || '').match(/^data:([^;,]+);base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) throw new Error('Invalid image data URL');
+  return {
+    mimeType: match[1].toLowerCase(),
+    base64: match[2].replace(/\s+/g, ''),
+  };
+}
+
+function mimeTypeFromDataUrl(dataUrl) {
+  return parseDataUrl(dataUrl).mimeType;
+}
+
+async function callClaude({ system, prompt, messages, stream, onToken, keys, signal }) {
   if (!keys.anthropic) throw new Error('Missing ANTHROPIC_API_KEY');
+  const normalized = normalizeInputMessages({ system, prompt, messages });
+  const systemText = normalized
+    .filter((message) => message.role === 'system')
+    .flatMap((message) => message.content)
+    .map((part) => part.text || '')
+    .join('\n\n');
 
   const res = await fetch(ANTHROPIC_URL, {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': keys.anthropic,
@@ -93,8 +230,8 @@ async function callClaude({ system, prompt, stream, onToken, keys }) {
       model: DEFAULTS.claudeModel,
       max_tokens: 8096,
       stream: !!stream,
-      system,
-      messages: [{ role: 'user', content: prompt }],
+      system: systemText,
+      messages: toAnthropicMessages(normalized),
     }),
   });
 
@@ -118,11 +255,13 @@ async function callClaude({ system, prompt, stream, onToken, keys }) {
   return { text, provider: 'claude', model: DEFAULTS.claudeModel };
 }
 
-async function callOpenAI({ system, prompt, stream, onToken, keys }) {
+async function callOpenAI({ system, prompt, messages, stream, onToken, keys, signal }) {
   if (!keys.openai) throw new Error('Missing OPENAI_API_KEY');
+  const normalized = normalizeInputMessages({ system, prompt, messages });
 
   const res = await fetch(OPENAI_URL, {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${keys.openai}`,
@@ -130,10 +269,7 @@ async function callOpenAI({ system, prompt, stream, onToken, keys }) {
     body: JSON.stringify({
       model: DEFAULTS.openaiModel,
       stream: !!stream,
-      messages: [
-        ...(system ? [{ role: 'system', content: system }] : []),
-        { role: 'user', content: prompt },
-      ],
+      messages: toOpenAIMessages(normalized),
     }),
   });
 
@@ -157,19 +293,24 @@ async function callOpenAI({ system, prompt, stream, onToken, keys }) {
   return { text, provider: 'openai', model: DEFAULTS.openaiModel };
 }
 
-async function callLocal({ system, prompt, stream, onToken, keys }) {
+async function callLocal({ system, prompt, messages, stream, onToken, keys, signal }) {
   if (!keys?.localConfigured || !keys?.localUrl || !keys?.localModel) {
     throw new Error('Missing Ollama configuration');
+  }
+  const normalized = normalizeInputMessages({ system, prompt, messages });
+  if (hasImageInputs(normalized)) {
+    throw new Error('Local provider does not support image inputs');
   }
   const localUrl = keys?.localUrl || OLLAMA_URL;
   const localModel = keys?.localModel || DEFAULTS.localModel;
 
   const res = await fetch(localUrl, {
     method: 'POST',
+    signal,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: localModel,
-      prompt: system ? `${system}\n\n${prompt}` : prompt,
+      prompt: flattenForLocal(normalized),
       stream: !!stream,
     }),
   });
@@ -203,9 +344,10 @@ async function callLocal({ system, prompt, stream, onToken, keys }) {
   return { text, provider: 'local', model: localModel };
 }
 
-async function call({ role = 'code', prompt, stream = false, system = '', apiKey = null, onToken = null }) {
+async function call({ role = 'code', prompt, messages = null, stream = false, system = '', apiKey = null, onToken = null, signal = null }) {
   const keys = resolveKeys(apiKey);
-  const providers = routeProviders(role).filter((provider) => {
+  const hasImages = hasImageInputs(messages || []);
+  const providers = routeProviders(role, { hasImages }).filter((provider) => {
     if (provider === 'claude') return Boolean(keys.anthropic);
     if (provider === 'openai') return Boolean(keys.openai);
     if (provider === 'local') return Boolean(keys.localConfigured);
@@ -215,15 +357,21 @@ async function call({ role = 'code', prompt, stream = false, system = '', apiKey
   const errors = [];
 
   if (providers.length === 0) {
+    if (hasImages) {
+      throw new Error('Image input requires an OpenAI or Anthropic provider with multimodal support');
+    }
     throw new Error('No configured model provider available');
   }
 
   for (const provider of providers) {
     try {
-      if (provider === 'claude') return await callClaude({ system, prompt, stream, onToken, keys });
-      if (provider === 'openai') return await callOpenAI({ system, prompt, stream, onToken, keys });
-      if (provider === 'local') return await callLocal({ system, prompt, stream, onToken, keys });
+      if (provider === 'claude') return await callClaude({ system, prompt, messages, stream, onToken, keys, signal });
+      if (provider === 'openai') return await callOpenAI({ system, prompt, messages, stream, onToken, keys, signal });
+      if (provider === 'local') return await callLocal({ system, prompt, messages, stream, onToken, keys, signal });
     } catch (err) {
+      if (signal?.aborted || err?.name === 'AbortError') {
+        throw err;
+      }
       lastError = err;
       errors.push(`${provider}: ${err.message}`);
     }
@@ -235,4 +383,10 @@ async function call({ role = 'code', prompt, stream = false, system = '', apiKey
   throw lastError || new Error('No available model provider');
 }
 
-module.exports = { call, routeProviders, resolveKeys };
+module.exports = {
+  call,
+  routeProviders,
+  resolveKeys,
+  normalizeInputMessages,
+  hasImageInputs,
+};

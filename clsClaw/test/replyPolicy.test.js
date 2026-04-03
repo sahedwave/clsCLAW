@@ -5,8 +5,10 @@ const assert = require('node:assert/strict');
 
 const {
   CANONICAL_FACTS,
+  BUILD_REVIEW_SECTIONS,
   normalizeMode,
   extractUserIntentText,
+  hasAttachedContext,
   detectIntent,
   intentToRole,
   maybeAnswerCanonicalQuestion,
@@ -27,6 +29,16 @@ test('extractUserIntentText strips appended context', () => {
   assert.equal(text, 'Fix the login bug');
 });
 
+test('hasAttachedContext detects appended workspace context', () => {
+  assert.equal(hasAttachedContext([
+    { role: 'user', content: 'Explain auth flow\n\nCONTEXT:\nFILE: auth.js' },
+  ]), true);
+
+  assert.equal(hasAttachedContext([
+    { role: 'user', content: 'Explain auth flow' },
+  ]), false);
+});
+
 test('detectIntent respects review and build requests', () => {
   assert.equal(detectIntent({
     mode: 'ask',
@@ -37,6 +49,13 @@ test('detectIntent respects review and build requests', () => {
     mode: 'build',
     messages: [{ role: 'user', content: 'hi there' }],
   }), 'build');
+});
+
+test('detectIntent routes repository deep dives to repo_analysis', () => {
+  assert.equal(detectIntent({
+    mode: 'ask',
+    messages: [{ role: 'user', content: 'Do a surgical analysis of this repository and compare it to another GitHub repo' }],
+  }), 'repo_analysis');
 });
 
 test('intentToRole maps chat to analyze and build to code', () => {
@@ -55,9 +74,11 @@ test('buildPolicySystem creates self-check guidance for build mode', () => {
   assert.equal(policy.mode, 'build');
   assert.equal(policy.intent, 'build');
   assert.equal(policy.role, 'code');
-  assert.match(policy.system, /Understanding:/);
-  assert.match(policy.system, /Self-check:/);
-  assert.match(policy.system, /Only after those sections, emit SAVE_AS/);
+  for (const section of BUILD_REVIEW_SECTIONS) {
+    assert.match(policy.system, new RegExp(`${section}:`));
+  }
+  assert.match(policy.system, /exact order/);
+  assert.match(policy.system, /If you cannot confidently produce the full review contract, do not emit SAVE_AS or RUN blocks yet/);
 });
 
 test('buildPolicySystem keeps ask mode in plain-text guidance', () => {
@@ -71,6 +92,48 @@ test('buildPolicySystem keeps ask mode in plain-text guidance', () => {
   assert.equal(policy.role, 'analyze');
   assert.match(policy.system, /Reply in plain text by default/);
   assert.match(policy.system, /Do not emit SAVE_AS blocks/);
+  assert.match(policy.system, /Ask at most one clarifying question/);
+});
+
+test('buildPolicySystem propagates execution profile guidance', () => {
+  const policy = buildPolicySystem({
+    projectRoot: '/tmp/demo',
+    mode: 'ask',
+    profile: 'parallel',
+    messages: [{ role: 'user', content: 'Analyze this repo and gather evidence first' }],
+  });
+
+  assert.equal(policy.profile, 'parallel');
+  assert.equal(policy.executionProfile.id, 'parallel');
+  assert.match(policy.system, /Execution profile:/);
+  assert.match(policy.system, /Safe parallel reads preferred: yes/);
+});
+
+test('buildPolicySystem adds evidence-first rules for repo analysis', () => {
+  const policy = buildPolicySystem({
+    projectRoot: '/tmp/demo',
+    mode: 'ask',
+    messages: [{ role: 'user', content: 'Compare this repository to another GitHub repo with a surgical analysis' }],
+  });
+
+  assert.equal(policy.intent, 'repo_analysis');
+  assert.equal(policy.role, 'analyze');
+  assert.match(policy.system, /Verified, Inferred, Missing Evidence, Recommendation/);
+  assert.match(policy.system, /Never present inference as fact/);
+  assert.match(policy.system, /Prefer grounding your answer in workspace files/);
+});
+
+test('buildPolicySystem adds findings-first review guidance', () => {
+  const policy = buildPolicySystem({
+    projectRoot: '/tmp/demo',
+    mode: 'ask',
+    messages: [{ role: 'user', content: 'Review this change for bugs and regressions' }],
+  });
+
+  assert.equal(policy.intent, 'review');
+  assert.equal(policy.role, 'review');
+  assert.match(policy.system, /Start with Findings/);
+  assert.match(policy.system, /If you do not find a real issue, say "No findings"/);
 });
 
 test('maybeAnswerCanonicalQuestion returns the exact creator response for clsClaw', () => {

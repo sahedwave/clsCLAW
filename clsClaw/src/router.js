@@ -1,7 +1,4 @@
-/**
- * router.js — Zero-dependency HTTP router
- * Replaces express+cors using Node built-in http
- */
+
 'use strict';
 
 const http = require('http');
@@ -17,14 +14,14 @@ const MIME = {
 
 class Router {
   constructor() {
-    this._routes = [];  // {method, pattern, handler}
+    this._routes = [];  
     this._staticDir = null;
   }
 
   static(dir) { this._staticDir = dir; }
 
   _add(method, pattern, handler) {
-    // Convert :param to named capture groups
+    
     const rx = new RegExp('^' + pattern.replace(/:(\w+)/g,'(?<$1>[^/]+)') + '$');
     this._routes.push({ method, rx, handler, pattern });
   }
@@ -36,7 +33,7 @@ class Router {
 
   handler() {
     return async (req, res) => {
-      // CORS
+      
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,PATCH,OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -45,7 +42,7 @@ class Router {
       const urlObj = new URL(req.url, `http://localhost`);
       const pathname = decodeURIComponent(urlObj.pathname);
 
-      // Parse body
+      
       req.query = Object.fromEntries(urlObj.searchParams);
       req.body = {};
       if (['POST','PATCH','PUT'].includes(req.method)) {
@@ -57,7 +54,7 @@ class Router {
         } catch {}
       }
 
-      // Build res helpers
+      
       res.json = (data, code=200) => {
         const body = JSON.stringify(data);
         res.writeHead(code, {'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)});
@@ -65,13 +62,13 @@ class Router {
       };
       res.status = (code) => { res._statusCode = code; return res; };
 
-      // SSE - skip routing for /api/events (handled separately)
+      
       if (pathname === '/api/events') {
         const match = this._routes.find(r => r.method==='GET' && r.rx.test('/api/events'));
         if (match) { match.handler(req, res); return; }
       }
 
-      // Route matching
+      
       for (const route of this._routes) {
         if (route.method !== req.method) continue;
         const m = pathname.match(route.rx);
@@ -84,7 +81,7 @@ class Router {
         }
       }
 
-      // Static files
+      
       if (this._staticDir && req.method === 'GET') {
         let filePath = path.join(this._staticDir, pathname === '/' ? 'index.html' : pathname);
         if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
@@ -94,7 +91,7 @@ class Router {
           res.end(content);
           return;
         }
-        // SPA fallback
+        
         const idx = path.join(this._staticDir, 'index.html');
         if (fs.existsSync(idx)) {
           res.writeHead(200, {'Content-Type':'text/html'});

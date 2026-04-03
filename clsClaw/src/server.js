@@ -1,8 +1,4 @@
-/**
- * server.js — cLoSe
- * Zero npm dependencies — pure Node.js built-ins only.
- * Requires Node.js 18+ (built-in fetch, crypto.randomUUID)
- */
+
 'use strict';
 
 const http   = require('http');
@@ -17,17 +13,18 @@ const PORT = 3737;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const DATA_DIR   = path.join(__dirname, '..', 'data');
 
-['pending','history','index','jobs','versions','memory'].forEach(d =>
+['pending','history','index','jobs','versions','memory','turns','uploads'].forEach(d =>
   fs.mkdirSync(path.join(DATA_DIR, d), { recursive: true })
 );
 
-// ── Subsystems ────────────────────────────────────────────────────────────────
+
 const broadcaster   = require('./sse');
 const sandbox       = require('./sandbox/sandbox');
 const permGate      = require('./sandbox/permissions');
 const ApprovalQueue = require('./diff/approvalQueue');
 const AgentManager  = require('./agents/agentManager');
 const Planner       = require('./agents/planner');
+const { SwarmCoordinator } = require('./agents/swarmCoordinator');
 const worktrees     = require('./worktrees/worktrees');
 const ContextEngine = require('./context/contextEngine');
 const SkillRegistry = require('./skills/skills');
@@ -35,9 +32,30 @@ const AutoScheduler = require('./automations/automations');
 const GitHubClient  = require('./github/github');
 const MemoryStore   = require('./memory/memoryStore');
 const { diffFileVsProposed, setVersionStore } = require('./diff/diff');
+const { materializePatchDocument } = require('./diff/patchProposal');
+const { ExtensionManager } = require('./extensions/extensionManager');
+const ConnectorManager = require('./connectors/connectorManager');
+const { WebClient } = require('./web/webClient');
+const { ImageStore } = require('./media/imageStore');
+const { ArtifactStore } = require('./artifacts/artifactStore');
+const TurnTraceStore = require('./orchestration/turnTraceStore');
+const { ToolRuntime } = require('./orchestration/toolRuntime');
+const { TurnOrchestrator } = require('./orchestration/turnOrchestrator');
 const VersionStore  = require('./versions/versionStore');
 const modelRouter   = require('./llm/modelRouter');
-const { buildPolicySystem, maybeAnswerCanonicalQuestion } = require('./llm/replyPolicy');
+const {
+  buildPolicySystem,
+  maybeAnswerCanonicalQuestion,
+  hasAttachedContext,
+} = require('./llm/replyPolicy');
+const {
+  getIdentityTemplates,
+  readIdentityFiles,
+  ensureIdentityFiles,
+  writeIdentityFile,
+  readIdentityContext,
+} = require('./workspaceIdentity');
+const { auditWorkspace, applyAuditFixes } = require('./security/workspaceAudit');
 const {
   loadConfig,
   saveConfig,
@@ -47,7 +65,7 @@ const {
   getProviderStatus,
 } = require('./configStore');
 
-// ── App state ─────────────────────────────────────────────────────────────────
+
 const storedConfig = loadConfig();
 let projectRoot = storedConfig.projectRoot || process.env.HOME || require('os').homedir();
 let githubToken  = storedConfig.githubToken || process.env.GITHUB_TOKEN || '';
@@ -57,20 +75,71 @@ let lastSystemError = null;
 const approvalQueue = new ApprovalQueue(path.join(DATA_DIR, 'history'));
 const versionStore  = new VersionStore(path.join(DATA_DIR, 'versions'));
 const skillRegistry = new SkillRegistry();
+const extensionManager = new ExtensionManager(path.join(DATA_DIR, 'extensions'));
 const memoryStore   = new MemoryStore(path.join(DATA_DIR, 'memory'));
 const agentManager  = new AgentManager({ approvalQueue, permissionGate: permGate });
 const planner       = new Planner({ agentManager, memoryStore });
+const swarmCoordinator = new SwarmCoordinator({ agentManager });
+skillRegistry.setExtensionManager(extensionManager);
+extensionManager.setSkillRegistry(skillRegistry);
 const contextEngine = new ContextEngine();
 const automations   = new AutoScheduler(path.join(DATA_DIR, 'jobs'), skillRegistry);
+const webClient = new WebClient();
+const connectorManager = new ConnectorManager({
+  getProjectRoot: () => projectRoot,
+  skillRegistry,
+  automations,
+  contextEngine,
+  githubClientFactory: (token) => new GitHubClient(token),
+  sandbox,
+  webClient,
+  githubTokenGetter: () => githubToken,
+});
+const imageStore = new ImageStore(path.join(DATA_DIR, 'uploads'));
+const artifactStore = new ArtifactStore(path.join(DATA_DIR, 'artifacts'));
+const turnTraceStore = new TurnTraceStore(path.join(DATA_DIR, 'turns'));
+const toolRuntime = new ToolRuntime({
+  projectRootGetter: () => projectRoot,
+  contextEngine,
+  connectorManager,
+  sandbox,
+  webClient,
+  visionAnalyzer: async ({ prompt, providers, messages, signal }) => modelRouter.call({
+    role: 'analyze',
+    system: [
+      'You are analyzing one or more attached images or screenshots for a software engineering workflow.',
+      'Describe only what is visibly supported by the image.',
+      'If something is unclear, say so explicitly.',
+      'Focus on UI states, errors, text shown, controls, layout, and details relevant to the user request.',
+    ].join('\n'),
+    messages: [
+      ...messages,
+      {
+        role: 'user',
+        content: [{ type: 'text', text: `Image analysis request:\n${prompt}` }],
+      },
+    ],
+    apiKey: providers,
+    stream: false,
+    signal,
+  }),
+});
+const turnOrchestrator = new TurnOrchestrator({
+  modelRouter,
+  toolRuntime,
+  traceStore: turnTraceStore,
+});
 
-// Wire cross-dependencies
 setVersionStore(versionStore);
 automations.setApprovalQueue(approvalQueue);
+automations.setMemoryStore(memoryStore);
+automations.setWebClient(webClient);
+automations.setArtifactStore(artifactStore);
 contextEngine.setIndexDir(path.join(DATA_DIR, 'index'));
 if (providerConfig.anthropic) contextEngine.setApiKey(providerConfig.anthropic);
+contextEngine.setProviderConfig(providerConfig);
 agentManager.setMemoryStore(memoryStore);
 
-// ── Wire events → SSE ─────────────────────────────────────────────────────────
 function bc(type, payload) { broadcaster.broadcast(type, payload); }
 function setLastSystemError(message, meta = {}) {
   lastSystemError = {
@@ -82,6 +151,23 @@ function setLastSystemError(message, meta = {}) {
 
 function resolveModelProviders(preferred = null) {
   return resolveProviderConfig(preferred || providerConfig);
+}
+
+function createRequestController(req, timeoutMs = 60000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error('Request timed out')), timeoutMs);
+  req.on('close', () => controller.abort(new Error('Client disconnected')));
+  return {
+    signal: controller.signal,
+    cleanup() {
+      clearTimeout(timer);
+    },
+  };
+}
+
+function getWorkspaceIdentityPrompt() {
+  const identity = readIdentityContext(projectRoot, { maxCharsPerFile: 1200 });
+  return identity ? `Workspace identity:\n${identity}` : '';
 }
 
 function hasModelProvider(preferred = null) {
@@ -116,6 +202,71 @@ function flattenMessages(messages = []) {
   }).join('\n\n');
 }
 
+async function getAutoContextPrompt({ policy, messages = [], providers = {} } = {}) {
+  if (!policy?.userText) return '';
+  if (hasAttachedContext(messages)) return '';
+  if (!contextEngine.getStats().indexed) return '';
+  if (!['repo_analysis', 'review', 'build', 'test', 'docs', 'plan'].includes(policy.intent)) return '';
+
+  try {
+    const ctx = await contextEngine.query(policy.userText, {
+      maxFiles: policy.intent === 'review' ? 10 : 8,
+      maxTokens: policy.intent === 'build' ? 10000 : 8000,
+      providerConfig: providers,
+    });
+    if (!ctx.files?.length) return '';
+    return [
+      'Auto-inspected workspace context:',
+      `Mode: ${ctx.mode}`,
+      ...ctx.files.map((file) => `FILE: ${file.relativePath} (score:${Math.round(file.score * 100) / 100})\n${file.content}`),
+    ].join('\n\n');
+  } catch {
+    return '';
+  }
+}
+
+async function resolveContextFilesForTask(contextQuery, providers, { maxFiles = 8, maxTokens = 10000 } = {}) {
+  if (!contextQuery || !contextEngine.getStats().indexed) return [];
+  const ctx = await contextEngine.query(contextQuery, {
+    maxFiles,
+    maxTokens,
+    providerConfig: providers,
+  });
+  return ctx.files || [];
+}
+
+function buildExecPermissionRequest(command, assessment, { agentId = 'manual' } = {}) {
+  const type = assessment.isInstall ? 'install' : 'exec';
+  const description = assessment.isInstall
+    ? `Package install: ${command}`
+    : assessment.requiresEscalation
+      ? `Run with host escalation: ${command}`
+      : `Run: ${command}`;
+  return {
+    type,
+    agentId,
+    description,
+    payload: {
+      command,
+      installRequest: assessment.installRequest || undefined,
+      executionMode: assessment.executionMode,
+      requiresEscalation: assessment.requiresEscalation,
+      escalationReason: assessment.escalationReason || '',
+      sandboxMode: assessment.sandboxMode,
+      timeoutMs: assessment.timeoutMs,
+    },
+  };
+}
+
+async function ensureCommandPermission({ command, projectRoot, skipApproval, agentId = 'manual' } = {}) {
+  const assessment = await sandbox.assessCommand(command, projectRoot);
+  if (skipApproval && !assessment.requiresEscalation) {
+    return assessment;
+  }
+  await permGate.request(buildExecPermissionRequest(command, assessment, { agentId }));
+  return assessment;
+}
+
 permGate.on('pending',  r => bc('permission:pending',  { request: r }));
 permGate.on('approved', r => bc('permission:approved', { request: r }));
 permGate.on('rejected', r => bc('permission:rejected', { request: r }));
@@ -123,6 +274,7 @@ permGate.on('rejected', r => bc('permission:rejected', { request: r }));
 approvalQueue.on('proposed',          c => bc('change:proposed',          { change: strip(c) }));
 approvalQueue.on('approved',          c => bc('change:approved',          { change: strip(c) }));
 approvalQueue.on('rejected',          c => bc('change:rejected',          { change: strip(c) }));
+approvalQueue.on('updated',           c => bc('change:updated',           { change: c }));
 approvalQueue.on('conflict_updated',  c => bc('change:conflict_updated',  { change: c }));
 approvalQueue.on('conflict_resolved', c => bc('change:conflict_resolved', { change: c }));
 
@@ -134,10 +286,15 @@ agentManager.on('agent:token',    d => bc('agent:token',    d));   // streaming 
 agentManager.on('agent:reply',    d => bc('agent:reply',    d));
 agentManager.on('agent:decision', d => bc('agent:decision', d));
 agentManager.on('agent:proposal', d => bc('agent:proposal', d));
+agentManager.on('agent:meta',     d => bc('agent:meta',     d));
+agentManager.on('agent:redirected', d => bc('agent:redirected', d));
+agentManager.on('agent:input_queued', d => bc('agent:input_queued', d));
+agentManager.on('agent:input_started', d => bc('agent:input_started', d));
 agentManager.on('agent:failure_analysis', d => bc('agent:failure_analysis', d));
 agentManager.on('agent:done',     a => bc('agent:done',     { agent: sa(a) }));
 agentManager.on('agent:error',    a => bc('agent:error',    { agent: sa(a) }));
 agentManager.on('agent:cancelled',a => bc('agent:cancelled',{ agent: sa(a) }));
+agentManager.on('agent:closed',   d => bc('agent:closed',   d));
 
 planner.on('plan:created',      p => bc('plan:created',      { plan: p }));
 planner.on('plan:updated',      p => bc('plan:updated',      { plan: p }));
@@ -151,34 +308,31 @@ planner.on('plan:step_error',   d => bc('plan:step_error',   d));
 
 automations.on('job:started', j => bc('job:started', { job: j }));
 automations.on('job:done',    r => bc('job:done',     { result: r }));
+automations.on('notification:new', (n) => bc('notification:new', { notification: n }));
+automations.on('notification:updated', (n) => bc('notification:updated', { notification: n }));
 
 function strip(c) { const { newContent, ...r } = c; return r; }
 function sa(a)    { const { worker, ...r } = a;      return r; }
 
-// ── Mime types ────────────────────────────────────────────────────────────────
 const MIME = {
   '.html':'text/html','.js':'application/javascript','.css':'text/css',
-  '.json':'application/json','.png':'image/png','.ico':'image/x-icon',
+  '.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.ico':'image/x-icon',
 };
 
-// ── Router ────────────────────────────────────────────────────────────────────
 async function router(req, res) {
   const parsed   = url.parse(req.url, true);
   const pathname = parsed.pathname;
   const method   = req.method.toUpperCase();
 
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
-  // SSE
   if (pathname === '/api/events') {
     return broadcaster.middleware()(req, res);
   }
 
-  // Static files
   if (!pathname.startsWith('/api/')) {
     const filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
     if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
@@ -186,14 +340,13 @@ async function router(req, res) {
       res.writeHead(200, { 'Content-Type': MIME[ext] || 'text/plain' });
       fs.createReadStream(filePath).pipe(res);
     } else {
-      // SPA fallback
+
       res.writeHead(200, { 'Content-Type': 'text/html' });
       fs.createReadStream(path.join(PUBLIC_DIR, 'index.html')).pipe(res);
     }
     return;
   }
 
-  // Parse JSON body
   let body = {};
   if (method === 'POST' && req.headers['content-type']?.includes('application/json')) {
     body = await readBody(req);
@@ -208,11 +361,24 @@ async function router(req, res) {
   }
 }
 
-// ── API handler ───────────────────────────────────────────────────────────────
 async function handleAPI(pathname, method, body, q, res, req) {
   const is = (route, expectedMethod) => pathname === route && method === expectedMethod;
+  const uploadMatch = pathname.match(/^\/api\/uploads\/([a-z0-9-]+)$/i);
 
-  // ── Config
+  if (uploadMatch && method === 'GET') {
+    try {
+      const attachment = imageStore.readAttachment(uploadMatch[1]);
+      res.writeHead(200, {
+        'Content-Type': attachment.mimeType,
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      });
+      res.end(attachment.buffer);
+      return;
+    } catch (err) {
+      return json(res, 404, { error: err.message });
+    }
+  }
+
   if (is('/api/config', 'GET')) {
     const sbInfo = await sandbox.getSandboxInfo();
     return json(res, 200, {
@@ -236,6 +402,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
       openaiKey,
       ollamaUrl,
       ollamaModel,
+      embeddingProvider,
     } = body;
     if (root) {
       if (!fs.existsSync(root)) return json(res, 400, { error: 'Path does not exist' });
@@ -249,13 +416,14 @@ async function handleAPI(pathname, method, body, q, res, req) {
     else if (Object.prototype.hasOwnProperty.call(body, 'token')) resolvedInput.githubToken = token;
     if (Object.prototype.hasOwnProperty.call(body, 'ollamaUrl')) resolvedInput.ollamaUrl = ollamaUrl;
     if (Object.prototype.hasOwnProperty.call(body, 'ollamaModel')) resolvedInput.ollamaModel = ollamaModel;
+    if (Object.prototype.hasOwnProperty.call(body, 'embeddingProvider')) resolvedInput.embeddingProvider = embeddingProvider;
     const resolvedProviders = resolveProviderConfig(resolvedInput);
     providerConfig = {
       ...providerConfig,
       ...resolvedProviders,
     };
     githubToken = resolvedProviders.githubToken;
-    contextEngine.setApiKey(providerConfig.anthropic);
+    contextEngine.setProviderConfig(providerConfig);
     saveConfig({
       projectRoot,
       anthropicKey: providerConfig.anthropic,
@@ -263,6 +431,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
       githubToken,
       ollamaUrl: providerConfig.ollamaUrl,
       ollamaModel: providerConfig.ollamaModel,
+      embeddingProvider: providerConfig.embeddingProvider,
     });
     return json(res, 200, {
       ok: true,
@@ -292,9 +461,10 @@ async function handleAPI(pathname, method, body, q, res, req) {
     else if (Object.prototype.hasOwnProperty.call(body, 'token')) payload.githubToken = body.token;
     if (Object.prototype.hasOwnProperty.call(body, 'ollamaUrl')) payload.ollamaUrl = body.ollamaUrl;
     if (Object.prototype.hasOwnProperty.call(body, 'ollamaModel')) payload.ollamaModel = body.ollamaModel;
+    if (Object.prototype.hasOwnProperty.call(body, 'embeddingProvider')) payload.embeddingProvider = body.embeddingProvider;
     providerConfig = resolveProviderConfig(payload);
     githubToken = providerConfig.githubToken;
-    contextEngine.setApiKey(providerConfig.anthropic);
+    contextEngine.setProviderConfig(providerConfig);
     saveConfig({
       ...loadConfig(),
       anthropicKey: providerConfig.anthropic,
@@ -302,6 +472,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
       githubToken,
       ollamaUrl: providerConfig.ollamaUrl,
       ollamaModel: providerConfig.ollamaModel,
+      embeddingProvider: providerConfig.embeddingProvider,
     });
     return json(res, 200, {
       ok: true,
@@ -324,12 +495,21 @@ async function handleAPI(pathname, method, body, q, res, req) {
     const anthropicKey = String(body.anthropicKey || '').trim();
     if (!anthropicKey) return json(res, 400, { error: 'anthropicKey required' });
     providerConfig = { ...providerConfig, anthropic: anthropicKey };
-    contextEngine.setApiKey(providerConfig.anthropic);
+    contextEngine.setProviderConfig(providerConfig);
     saveConfig({ ...loadConfig(), anthropicKey });
     return json(res, 200, { ok: true, anthropicKey: maskApiKey(anthropicKey) });
   }
 
-  // ── Health — full system status
+  if (is('/api/turns/recent', 'GET')) {
+    return json(res, 200, turnTraceStore.listRecent(Number(q.limit) || 20));
+  }
+  const turnIdM = pathname.match(/^\/api\/turns\/([^/]+)$/);
+  if (turnIdM && method === 'GET') {
+    const turn = turnTraceStore.getTurn(turnIdM[1]);
+    if (!turn) return json(res, 404, { error: 'Turn not found' });
+    return json(res, 200, turn);
+  }
+
   if (is('/api/health', 'GET')) {
     const sbInfo   = await sandbox.getSandboxInfo();
     const ctxStats = contextEngine.getStats();
@@ -340,7 +520,6 @@ async function handleAPI(pathname, method, body, q, res, req) {
     const providerStatus = getProviderStatus(providerConfig);
     const ollamaReachable = await probeOllama(providerConfig.ollamaUrl);
 
-    // Check git availability
     let gitOk = false;
     try {
       await new Promise((resolve, reject) => {
@@ -349,7 +528,6 @@ async function handleAPI(pathname, method, body, q, res, req) {
       gitOk = true;
     } catch {}
 
-    // Check Docker
     const dockerOk = sbInfo.mode === 'docker';
 
     const health = {
@@ -370,6 +548,9 @@ async function handleAPI(pathname, method, body, q, res, req) {
         files:            ctxStats.files   || 0,
         embeddingStatus:  ctxStats.embeddingStatus || 'disabled',
         embeddingChunks:  ctxStats.embeddingChunks || 0,
+        embeddingProviderSelected: ctxStats.embeddingProviderSelected || 'auto',
+        embeddingProviderActive: ctxStats.embeddingProviderActive || null,
+        embeddingProviderModel: ctxStats.embeddingProviderModel || null,
       },
       agents: {
         total:    agents.length,
@@ -386,10 +567,14 @@ async function handleAPI(pathname, method, body, q, res, req) {
       permissions: {
         pending: perms.length,
         installs: perms.filter(p => p.type === 'install').length,
+        escalations: perms.filter(p => p.payload?.requiresEscalation).length,
       },
       automations: {
         jobs:    jobs.length,
         enabled: jobs.filter(j => j.enabled).length,
+      },
+      identity: {
+        files: readIdentityFiles(projectRoot, { includeContent: false }).filter((file) => file.exists).length,
       },
       providers: {
         ...providerStatus,
@@ -402,7 +587,6 @@ async function handleAPI(pathname, method, body, q, res, req) {
       lastError: lastSystemError,
     };
 
-    // Overall status degrades if there are unresolved conflicts or errors
     if (health.approvalQueue.conflicts > 0) health.status = 'warn';
     if (agents.filter(a => a.status === 'error').length > 0) health.status = 'warn';
     if (!health.llmReady) health.status = 'warn';
@@ -410,24 +594,139 @@ async function handleAPI(pathname, method, body, q, res, req) {
     return json(res, 200, health);
   }
 
-  // ── Sandbox info
   if (is('/api/sandbox/info', 'GET')) {
     return json(res, 200, await sandbox.getSandboxInfo());
   }
+  if (is('/api/sandbox/assess', 'POST')) {
+    try {
+      return json(res, 200, await sandbox.assessCommand(body.command, projectRoot));
+    } catch (err) {
+      return json(res, 400, { error: err.message });
+    }
+  }
 
-  // Inspect what an install command would install — no execution, no gate
+  if (is('/api/web/search', 'POST')) {
+    try {
+      return json(res, 200, await webClient.search(body.query, {
+        limit: body.limit,
+        domains: body.domains,
+      }));
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
+  if (is('/api/web/open', 'POST')) {
+    try {
+      return json(res, 200, await webClient.open(body.url));
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
+  if (is('/api/web/docs', 'POST')) {
+    try {
+      return json(res, 200, await webClient.docs(body.query, {
+        domains: body.domains,
+        limit: body.limit,
+      }));
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
+  if (is('/api/uploads/image', 'POST')) {
+    try {
+      if (!body.dataUrl) return json(res, 400, { error: 'dataUrl required' });
+      return json(res, 200, imageStore.saveDataUrl({
+        dataUrl: body.dataUrl,
+        name: body.name,
+      }));
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
+
+  if (is('/api/identity', 'GET')) {
+    return json(res, 200, {
+      templates: getIdentityTemplates(),
+      files: readIdentityFiles(projectRoot, { includeContent: true }),
+    });
+  }
+  if (is('/api/identity/bootstrap', 'POST')) {
+    const names = Array.isArray(body.names) && body.names.length
+      ? body.names.filter((name) => typeof name === 'string')
+      : undefined;
+    const created = ensureIdentityFiles(projectRoot, names);
+    return json(res, 200, {
+      ok: true,
+      created,
+      files: readIdentityFiles(projectRoot, { includeContent: true }),
+    });
+  }
+  if (is('/api/identity/file', 'POST')) {
+    if (!body.name) return json(res, 400, { error: 'name required' });
+    writeIdentityFile(projectRoot, body.name, body.content || '');
+    return json(res, 200, {
+      ok: true,
+      files: readIdentityFiles(projectRoot, { includeContent: true }),
+    });
+  }
+
+  if (is('/api/security/audit', 'GET')) {
+    return json(res, 200, auditWorkspace({
+      projectRoot,
+      sandboxInfo: await sandbox.getSandboxInfo(),
+      providerStatus: getProviderStatus(providerConfig),
+      automations: automations.listJobs(),
+    }));
+  }
+  if (is('/api/security/audit/fix', 'POST')) {
+    const result = applyAuditFixes(projectRoot);
+    return json(res, 200, {
+      ok: true,
+      result,
+      report: auditWorkspace({
+        projectRoot,
+        sandboxInfo: await sandbox.getSandboxInfo(),
+        providerStatus: getProviderStatus(providerConfig),
+        automations: automations.listJobs(),
+      }),
+    });
+  }
+
+  if (is('/api/heartbeat/setup', 'POST')) {
+    ensureIdentityFiles(projectRoot, ['IDENTITY.md', 'USER.md', 'SOUL.md', 'AGENTS.md', 'HEARTBEAT.md']);
+    const existing = automations.listJobs().find((job) => job.skillId === 'heartbeat-review');
+    if (existing) return json(res, 200, { ok: true, created: false, job: existing });
+    return json(res, 200, automations.createJob({
+      name: 'Heartbeat review',
+      cronExpr: body.cronExpr || '*/30 * * * *',
+      type: 'skill',
+      skillId: 'heartbeat-review',
+      projectRoot,
+    }));
+  }
+  if (is('/api/heartbeat/presets', 'GET')) {
+    return json(res, 200, automations.getHeartbeatPresets());
+  }
+  if (is('/api/heartbeat/create', 'POST')) {
+    const presetId = String(body.presetId || '').trim();
+    const preset = automations.getHeartbeatPresets().find((item) => item.id === presetId);
+    if (!preset) return json(res, 404, { error: 'Unknown heartbeat preset' });
+    return json(res, 200, automations.createJob({
+      name: body.name || preset.name,
+      cronExpr: body.cronExpr || preset.cronExpr,
+      type: 'heartbeat',
+      heartbeatKind: preset.id,
+      options: {
+        ...(preset.options || {}),
+        ...((body.options && typeof body.options === 'object') ? body.options : {}),
+      },
+      projectRoot,
+    }));
+  }
+
   if (is('/api/sandbox/install-check', 'POST')) {
     const installReq = sandbox.detectInstall(body.command || '');
     if (!installReq) return json(res, 200, { isInstall: false });
     return json(res, 200, { isInstall: true, installRequest: installReq });
   }
 
-  // ── File system
   if (is('/api/fs/list', 'GET')) {
     const dir = q.dir || projectRoot;
     try {
       sandbox.assertPathSafe(dir, projectRoot);
-      const IGNORE = new Set(['node_modules','.git','__pycache__','.DS_Store','.codex-worktrees']);
+      const IGNORE = new Set(['node_modules','.git','__pycache__','.DS_Store','.closeclaw-worktrees']);
       const entries = fs.readdirSync(dir, { withFileTypes: true })
         .filter(e => !IGNORE.has(e.name))
         .map(e => {
@@ -456,8 +755,31 @@ async function handleAPI(pathname, method, body, q, res, req) {
         agentId: 'manual', agentName: 'You',
         description: body.description || `Edit ${path.basename(body.filePath)}`,
         projectRoot,
+        approvalContext: body.approvalContext || null,
       });
       return json(res, 200, pending.skipped ? { skipped: true } : strip(pending));
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
+
+  if (is('/api/fs/propose-patch', 'POST')) {
+    try {
+      if (!body.patchText) return json(res, 400, { error: 'patchText required' });
+      const proposals = materializePatchDocument(body.patchText, projectRoot);
+      const created = [];
+      for (const proposal of proposals) {
+        sandbox.assertPathSafe(proposal.filePath, projectRoot);
+        const pending = await approvalQueue.propose({
+          filePath: proposal.filePath,
+          newContent: proposal.content,
+          agentId: 'manual',
+          agentName: 'You',
+          description: `Patch ${path.basename(proposal.filePath)}`,
+          projectRoot,
+          approvalContext: body.approvalContext || null,
+        });
+        if (!pending.skipped) created.push(strip(pending));
+      }
+      return json(res, 200, { ok: true, changes: created });
     } catch (err) { return json(res, 400, { error: err.message }); }
   }
 
@@ -469,7 +791,6 @@ async function handleAPI(pathname, method, body, q, res, req) {
     } catch (err) { return json(res, 400, { error: err.message }); }
   }
 
-  // ── Approval queue
   if (is('/api/changes/pending', 'GET')) {
     return json(res, 200, approvalQueue.getPending());
   }
@@ -491,8 +812,54 @@ async function handleAPI(pathname, method, body, q, res, req) {
     if (action === 'reject')       return json(res, 200, approvalQueue.reject(id, body.reason));
     if (action === 'edit-approve') return json(res, 200, await approvalQueue.editAndApprove(id, body.content));
   }
+  const changeGithubReviewM = pathname.match(/^\/api\/changes\/([^/]+)\/github-review$/);
+  if (changeGithubReviewM && method === 'POST') {
+    try {
+      const change = approvalQueue.getPendingById(changeGithubReviewM[1]);
+      if (!change || change.type !== 'review') return json(res, 404, { error: 'Review item not found' });
+      if (!body.owner || !body.repo || !body.pullNumber) {
+        return json(res, 400, { error: 'owner, repo, and pullNumber are required' });
+      }
+      const selectedIds = Array.isArray(body.commentIds) && body.commentIds.length
+        ? new Set(body.commentIds.map(String))
+        : null;
+      const comments = (change.inlineComments || [])
+        .filter((comment) => !selectedIds || selectedIds.has(String(comment.id)))
+        .filter((comment) => Number.isInteger(comment.currentStart))
+        .map((comment) => ({
+          path: comment.file,
+          line: comment.currentStart,
+          body: `${comment.title}\n\n${comment.body}`.trim(),
+        }));
+      if (!comments.length) {
+        return json(res, 400, { error: 'No anchored inline comments available to send' });
+      }
+      const reviewResult = await ghClient().submitPRReview({
+        owner: body.owner,
+        repo: body.repo,
+        pullNumber: body.pullNumber,
+        body: body.body || change.summary || 'Inline review from clsClaw',
+        event: body.event || 'COMMENT',
+        comments,
+      });
+      approvalQueue.updateReviewMetadata(change.id, {
+        githubReview: {
+          owner: body.owner,
+          repo: body.repo,
+          pullNumber: body.pullNumber,
+          event: body.event || 'COMMENT',
+          commentCount: comments.length,
+          reviewId: reviewResult?.id || null,
+          state: reviewResult?.state || 'submitted',
+          submittedAt: Date.now(),
+          url: `https:
+        },
+      });
+      return json(res, 200, reviewResult);
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
 
-  // ── Diff preview
+  
   if (is('/api/diff/preview', 'POST')) {
     try {
       sandbox.assertPathSafe(body.filePath, projectRoot);
@@ -500,7 +867,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
     } catch (err) { return json(res, 400, { error: err.message }); }
   }
 
-  // ── Version history
+  
   if (is('/api/versions/files', 'GET')) {
     return json(res, 200, versionStore.getAllTrackedFiles());
   }
@@ -531,7 +898,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
     } catch (err) { return json(res, 400, { error: err.message }); }
   }
   if (is('/api/versions/diff', 'POST')) {
-    // Diff between two version IDs, or a version vs current disk
+    
     const { versionId, compareToVersionId } = body;
     if (!versionId) return json(res, 400, { error: 'versionId required' });
     const contentA = versionStore.getContent(versionId);
@@ -541,7 +908,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
       contentB = versionStore.getContent(compareToVersionId);
       if (contentB === null) return json(res, 404, { error: 'compareToVersionId not found' });
     } else {
-      // Compare version vs current disk
+      
       const versions = [...versionStore.getAllTrackedFiles()];
       let filePath = null;
       for (const tf of versions) {
@@ -557,7 +924,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
     return json(res, 200, computeStructuredDiff(contentA, contentB, 'version diff'));
   }
 
-  // ── Permissions
+  
   if (is('/api/permissions/pending', 'GET')) {
     return json(res, 200, permGate.getPending());
   }
@@ -571,50 +938,35 @@ async function handleAPI(pathname, method, body, q, res, req) {
     if (action === 'reject')  return json(res, 200, permGate.reject(id, body.reason));
   }
 
-  // ── Exec (permission-gated)
+  
   if (is('/api/exec', 'POST')) {
     try {
       const { command, skipApproval } = body;
-
-      if (!skipApproval) {
-        // Run through sandbox first — detects installs before executing
-        const precheck = await sandbox.runCommand(command, projectRoot);
-
-        if (precheck.isInstall) {
-          // Install detected — must go through install gate (separate permission type)
-          await permGate.request({
-            type:        'install',
-            agentId:     'manual',
-            description: `Package install: ${command}`,
-            payload: {
-              command,
-              installRequest: precheck.installRequest,
-            },
-          });
-          // Approved — now run for real using runCommandApproved
-          return json(res, 200, await sandbox.runCommandApproved(command, projectRoot));
-        }
-
-        // Not an install — standard exec gate
-        await permGate.request({
-          type:        'exec',
-          agentId:     'manual',
-          description: `Run: ${command}`,
-          payload:     { command },
-        });
-      }
-
-      // skipApproval=true or non-install command approved above
-      return json(res, 200, await sandbox.runCommandApproved(command, projectRoot));
+      const assessment = await ensureCommandPermission({ command, projectRoot, skipApproval });
+      const result = await sandbox.runCommandApproved(command, projectRoot, {
+        executionMode: assessment.executionMode,
+        timeout: assessment.timeoutMs,
+      });
+      return json(res, 200, {
+        ...result,
+        executionMode: assessment.executionMode,
+        requiresEscalation: assessment.requiresEscalation,
+        escalationReason: assessment.escalationReason || '',
+      });
     } catch (err) { return json(res, 400, { error: err.message }); }
   }
 
-  // ── Agents
+  
   if (is('/api/agents', 'GET')) {
     return json(res, 200, agentManager.getAll());
   }
+  if (is('/api/agents/wait', 'GET')) {
+    const ids = String(q.ids || '').split(',').map((id) => id.trim()).filter(Boolean);
+    const timeoutMs = Math.min(300000, Math.max(1000, Number(q.timeoutMs) || 30000));
+    return json(res, 200, await agentManager.waitFor(ids, timeoutMs));
+  }
   if (is('/api/agents', 'POST')) {
-    const { task, agentName, useWorktree, contextQuery, apiKey, role } = body;
+    const { task, agentName, useWorktree, contextQuery, apiKey, role, parentAgentId } = body;
     const resolvedProviders = resolveModelProviders(apiKey);
     if (!task) return json(res, 400, { error: 'task required' });
     let worktreePath = null;
@@ -624,40 +976,148 @@ async function handleAPI(pathname, method, body, q, res, req) {
       if (wt.ok) worktreePath = wt.worktreePath;
       else console.warn('[server] Worktree failed:', wt.error);
     }
-    let contextFiles = [];
-    if (contextQuery && contextEngine.getStats().indexed) {
-      const ctx = await contextEngine.query(contextQuery, {
-        maxFiles: 8,
-        maxTokens: 10000,
-        apiKey: resolvedProviders.anthropic,
-      });
-      contextFiles = ctx.files || [];
-    }
-    // Inject relevant memory for this task
+    const contextFiles = await resolveContextFilesForTask(contextQuery, resolvedProviders, {
+      maxFiles: 8,
+      maxTokens: 10000,
+    });
+    
     const memory = memoryStore.query(task, { projectRoot });
+    const identityContext = getWorkspaceIdentityPrompt();
     const agent = await agentManager.launch({
       task, agentName, projectRoot, apiKey: resolvedProviders, contextFiles, worktreePath,
       role: role || 'code',
       memory,
+      identityContext,
+      parentAgentId: parentAgentId || null,
     });
     return json(res, 200, sa(agent));
+  }
+  if (is('/api/agents/orchestrate', 'POST')) {
+    const tasks = Array.isArray(body.tasks) ? body.tasks : [];
+    const resolvedProviders = resolveModelProviders(body.apiKey);
+    if (!tasks.length) return json(res, 400, { error: 'tasks required' });
+    const launched = [];
+    for (const item of tasks) {
+      if (!item?.task) continue;
+      let worktreePath = null;
+      if (item.useWorktree) {
+        const tmpId = require('crypto').randomBytes(4).toString('hex');
+        const wt = await worktrees.createWorktree(projectRoot, tmpId, item.agentName || 'agent');
+        if (wt.ok) worktreePath = wt.worktreePath;
+      }
+      const contextFiles = await resolveContextFilesForTask(item.contextQuery || item.task, resolvedProviders, {
+        maxFiles: 8,
+        maxTokens: 10000,
+      });
+      const agent = await agentManager.launch({
+        task: item.task,
+        agentName: item.agentName,
+        projectRoot,
+        apiKey: resolvedProviders,
+        contextFiles,
+        worktreePath,
+        role: item.role || 'code',
+        memory: memoryStore.query(item.task, { projectRoot }),
+        identityContext: getWorkspaceIdentityPrompt(),
+        parentAgentId: item.parentAgentId || null,
+      });
+      launched.push(sa(agent));
+    }
+    if (body.wait) {
+      const wait = await agentManager.waitFor(launched.map((agent) => agent.id), Math.min(300000, body.timeoutMs || 30000));
+      return json(res, 200, { ok: true, agents: launched, wait });
+    }
+    return json(res, 200, { ok: true, agents: launched });
+  }
+  if (is('/api/swarm', 'POST')) {
+    const { goal, maxAgents, apiKey } = body;
+    const resolvedProviders = resolveModelProviders(apiKey);
+    if (!goal) return json(res, 400, { error: 'goal required' });
+    const contextFiles = await resolveContextFilesForTask(goal, resolvedProviders, {
+      maxFiles: 8,
+      maxTokens: 10000,
+    });
+    try {
+      const result = await swarmCoordinator.launch({
+        goal,
+        projectRoot,
+        apiKey: resolvedProviders,
+        contextFiles,
+        identityContext: getWorkspaceIdentityPrompt(),
+        maxAgents,
+      });
+      return json(res, 200, result);
+    } catch (err) {
+      return json(res, 400, { error: err.message });
+    }
   }
   const agentIdM = pathname.match(/^\/api\/agents\/([^/]+)$/);
   if (agentIdM) {
     const id = agentIdM[1];
     if (method === 'DELETE') return json(res, 200, agentManager.cancel(id));
   }
+  const agentSpawnM = pathname.match(/^\/api\/agents\/([^/]+)\/spawn$/);
+  if (agentSpawnM) {
+    const parentAgentId = agentSpawnM[1];
+    const resolvedProviders = resolveModelProviders(body.apiKey);
+    if (!body.task) return json(res, 400, { error: 'task required' });
+    let worktreePath = null;
+    if (body.useWorktree) {
+      const tmpId = require('crypto').randomBytes(4).toString('hex');
+      const wt = await worktrees.createWorktree(projectRoot, tmpId, body.agentName || 'agent');
+      if (wt.ok) worktreePath = wt.worktreePath;
+    }
+    const contextFiles = await resolveContextFilesForTask(body.contextQuery || body.task, resolvedProviders, {
+      maxFiles: 8,
+      maxTokens: 10000,
+    });
+    const child = await agentManager.launch({
+      task: body.task,
+      agentName: body.agentName,
+      projectRoot,
+      apiKey: resolvedProviders,
+      contextFiles,
+      worktreePath,
+      role: body.role || 'code',
+      memory: memoryStore.query(body.task, { projectRoot }),
+      identityContext: getWorkspaceIdentityPrompt(),
+      parentAgentId,
+    });
+    return json(res, 200, sa(child));
+  }
+  const agentInputM = pathname.match(/^\/api\/agents\/([^/]+)\/input$/);
+  if (agentInputM) {
+    const id = agentInputM[1];
+    const resolvedProviders = resolveModelProviders(body.apiKey);
+    const contextFiles = await resolveContextFilesForTask(body.contextQuery || body.task, resolvedProviders, {
+      maxFiles: 8,
+      maxTokens: 10000,
+    });
+    return json(res, 200, agentManager.sendInput(id, {
+      task: body.task,
+      apiKey: resolvedProviders,
+      contextFiles,
+      role: body.role,
+      memory: body.task ? memoryStore.query(body.task, { projectRoot }) : undefined,
+      identityContext: getWorkspaceIdentityPrompt(),
+      interrupt: !!body.interrupt,
+    }));
+  }
+  const agentCloseM = pathname.match(/^\/api\/agents\/([^/]+)\/close$/);
+  if (agentCloseM) {
+    return json(res, 200, agentManager.close(agentCloseM[1]));
+  }
   const agentRetryM = pathname.match(/^\/api\/agents\/([^/]+)\/retry$/);
   if (agentRetryM) {
     return json(res, 200, agentManager.retry(agentRetryM[1], projectRoot, resolveModelProviders(body.apiKey)));
   }
 
-  // ── Planner
+  
   if (is('/api/plans', 'GET')) {
     return json(res, 200, planner.listPlans());
   }
   if (is('/api/plans', 'POST')) {
-    // Phase 1: generate plan
+    
     const { goal, contextQuery, apiKey } = body;
     const resolvedProviders = resolveModelProviders(apiKey);
     if (!goal) return json(res, 400, { error: 'goal required' });
@@ -667,11 +1127,17 @@ async function handleAPI(pathname, method, body, q, res, req) {
         const ctx = await contextEngine.query(contextQuery, {
           maxFiles: 6,
           maxTokens: 6000,
-          apiKey: resolvedProviders.anthropic,
+          providerConfig: resolvedProviders,
         });
         contextFiles = ctx.files || [];
       }
-      const plan = await planner.generatePlan({ goal, projectRoot, apiKey: resolvedProviders, contextFiles });
+      const plan = await planner.generatePlan({
+        goal,
+        projectRoot,
+        apiKey: resolvedProviders,
+        contextFiles,
+        identityContext: getWorkspaceIdentityPrompt(),
+      });
       return json(res, 200, plan);
     } catch (err) { return json(res, 500, { error: err.message }); }
   }
@@ -699,7 +1165,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
     }
   }
 
-  // ── Memory
+  
   if (is('/api/memory/stats', 'GET')) {
     return json(res, 200, memoryStore.getStats());
   }
@@ -722,7 +1188,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
     return json(res, 200, { ok: true });
   }
 
-  // ── Worktrees
+  
   if (is('/api/worktrees', 'GET')) {
     return json(res, 200, await worktrees.listWorktrees(projectRoot));
   }
@@ -736,15 +1202,14 @@ async function handleAPI(pathname, method, body, q, res, req) {
     return json(res, 200, await worktrees.getWorktreeDiff(projectRoot, q.branch));
   }
 
-  // ── Context engine
+  
   if (is('/api/context/index', 'POST')) {
     try {
-      const key = resolveModelProviders(body.apiKey).anthropic;
-      if (key) contextEngine.setApiKey(key);
-      // buildEmbeddings=true only when apiKey present — otherwise keyword-only
+      const resolvedProviders = resolveModelProviders(body.apiKey);
+      contextEngine.setProviderConfig(resolvedProviders);
       const stats = await contextEngine.buildIndex(projectRoot, {
-        apiKey:           key,
-        buildEmbeddings:  !!key,
+        providerConfig: resolvedProviders,
+        buildEmbeddings: !!resolvedProviders.openai || !!resolvedProviders.anthropic,
       });
       return json(res, 200, { ok: true, ...stats });
     } catch (err) { return json(res, 500, { error: err.message }); }
@@ -760,73 +1225,104 @@ async function handleAPI(pathname, method, body, q, res, req) {
       const result = await contextEngine.query(body.query, {
         maxFiles:  body.maxFiles  || 10,
         maxTokens: body.maxTokens || 12000,
-        apiKey:    resolveModelProviders(body.apiKey).anthropic,
+        providerConfig: resolveModelProviders(body.apiKey),
       });
       return json(res, 200, result);
     } catch (err) { return json(res, 500, { error: err.message }); }
   }
 
-  // Rebuild embeddings for already-indexed project (no file re-read needed)
+  
   if (is('/api/context/reindex', 'POST')) {
-    const key = resolveModelProviders(body.apiKey).anthropic;
-    if (!key) return json(res, 400, { error: 'apiKey required for embedding reindex' });
+    const resolvedProviders = resolveModelProviders(body.apiKey);
+    if (!resolvedProviders.openai && !resolvedProviders.anthropic) {
+      return json(res, 400, { error: 'An OpenAI or Anthropic embedding provider is required for reindex' });
+    }
     try {
-      const result = await contextEngine.reindex(key);
+      const result = await contextEngine.reindex(resolvedProviders);
       return json(res, 200, result);
     } catch (err) { return json(res, 500, { error: err.message }); }
   }
 
-  // ── LLM proxy (legacy /api/claude alias kept for compatibility)
+  
   if (is('/api/chat', 'POST') || is('/api/claude', 'POST')) {
-    const { apiKey, messages, system, mode } = body;
+    const { apiKey, messages, system, mode, profile } = body;
+    const requestCtl = createRequestController(req, 60000);
     try {
-      const canonical = maybeAnswerCanonicalQuestion({ messages });
+      const hydratedMessages = hydrateMessages(messages || []);
+      const canonical = maybeAnswerCanonicalQuestion({ messages: hydratedMessages });
       if (canonical) {
+        requestCtl.cleanup();
         return json(res, 200, {
           provider: 'policy',
           model: 'canonical-facts',
           role: canonical.role,
           intent: canonical.intent,
           mode: canonical.mode,
+          profile: 'deliberate',
           content: [{ type: 'text', text: canonical.text }],
         });
       }
+      const resolvedProviders = resolveModelProviders(apiKey);
       const policy = buildPolicySystem({
         projectRoot,
-        messages,
+        messages: hydratedMessages,
         mode,
-        incomingSystem: system || '',
+        profile,
+        incomingSystem: [
+          system || '',
+          getWorkspaceIdentityPrompt(),
+          await getAutoContextPrompt({ policy: buildPolicySystem({ projectRoot, messages: hydratedMessages, mode, profile }), messages: hydratedMessages, providers: resolvedProviders }),
+        ].filter(Boolean).join('\n\n'),
       });
-      const reply = await modelRouter.call({
-        role: policy.role,
-        system: policy.system,
-        prompt: flattenMessages(messages),
-        apiKey: resolveModelProviders(apiKey),
-        stream: false,
+      const reply = await turnOrchestrator.runTurn({
+        providers: resolvedProviders,
+        policy,
+        messages: hydratedMessages,
+        signal: requestCtl.signal,
       });
+      requestCtl.cleanup();
       return json(res, 200, {
         provider: reply.provider,
         model: reply.model,
         role: policy.role,
         intent: policy.intent,
         mode: policy.mode,
+        profile: policy.profile,
+        turnId: reply.turnId,
+        trace: reply.trace,
+        deliberation: reply.trace?.deliberation || null,
+        governor: reply.trace?.governor || null,
+        evidenceBundle: reply.trace?.evidenceBundle || null,
+        sources: (reply.trace?.evidence || []).filter((evidence) => ['web', 'web_search', 'docs_search'].includes(evidence.type)),
         content: [{ type: 'text', text: reply.text }],
       });
-    } catch (err) { return json(res, 400, { error: err.message }); }
+    } catch (err) {
+      requestCtl.cleanup();
+      return json(res, 400, { error: err.message });
+    }
   }
 
-  // ── Streaming LLM endpoint (legacy /api/claude/stream alias kept for compatibility)
+  
   if (is('/api/chat/stream', 'POST') || is('/api/claude/stream', 'POST')) {
-    const { apiKey, messages, system, mode } = body;
-    const canonical = maybeAnswerCanonicalQuestion({ messages });
+    const { apiKey, messages, system, mode, profile } = body;
+    const requestCtl = createRequestController(req, 120000);
+    const hydratedMessages = hydrateMessages(messages || []);
+    const canonical = maybeAnswerCanonicalQuestion({ messages: hydratedMessages });
+    const resolvedProviders = resolveModelProviders(apiKey);
+    const basePolicy = buildPolicySystem({ projectRoot, messages: hydratedMessages, mode, profile });
     const policy = buildPolicySystem({
       projectRoot,
-      messages,
+      messages: hydratedMessages,
       mode,
-      incomingSystem: system || '',
+      profile,
+      incomingSystem: [
+        system || '',
+        getWorkspaceIdentityPrompt(),
+        await getAutoContextPrompt({ policy: basePolicy, messages: hydratedMessages, providers: resolvedProviders }),
+      ].filter(Boolean).join('\n\n'),
     });
 
-    // Set up SSE headers for this individual response
+    
     res.writeHead(200, {
       'Content-Type':                'text/event-stream',
       'Cache-Control':               'no-cache',
@@ -846,21 +1342,26 @@ async function handleAPI(pathname, method, body, q, res, req) {
         role: canonical.role,
         intent: canonical.intent,
         mode: canonical.mode,
+        profile: 'deliberate',
       });
       sendEvent({ type: 'token', text: canonical.text });
       sendEvent({ type: 'done', provider: 'policy', model: 'canonical-facts' });
+      requestCtl.cleanup();
       res.end();
       return;
     }
 
     try {
-      const reply = await modelRouter.call({
-        role: policy.role,
-        system: policy.system,
-        prompt: flattenMessages(messages),
-        apiKey: resolveModelProviders(apiKey),
-        stream: true,
+      const reply = await turnOrchestrator.runTurn({
+        providers: resolvedProviders,
+        policy,
+        messages: hydratedMessages,
+        signal: requestCtl.signal,
         onToken: (text) => sendEvent({ type: 'token', text }),
+        onEvent: (evt) => {
+          sendEvent(evt);
+          bc(`turn:${evt.type}`, evt);
+        },
       });
       sendEvent({
         type: 'meta',
@@ -869,42 +1370,31 @@ async function handleAPI(pathname, method, body, q, res, req) {
         role: policy.role,
         intent: policy.intent,
         mode: policy.mode,
+        profile: policy.profile,
+        turnId: reply.turnId,
+        deliberation: reply.trace?.deliberation || null,
+        governor: reply.trace?.governor || null,
       });
       sendEvent({ type: 'done', provider: reply.provider, model: reply.model });
+      requestCtl.cleanup();
       res.end();
     } catch (err) {
       sendEvent({ type: 'error', error: err.message });
+      requestCtl.cleanup();
       res.end();
     }
     return;
   }
 
-  // ── Streaming exec endpoint — streams stdout/stderr line by line
   if (is('/api/exec/stream', 'POST')) {
     const { command, skipApproval } = body;
-
-    // Permission gate (same as /api/exec)
-    if (!skipApproval) {
-      try {
-        const precheck = await sandbox.runCommand(command, projectRoot);
-        if (precheck.isInstall) {
-          await permGate.request({
-            type: 'install', agentId: 'manual',
-            description: `Package install: ${command}`,
-            payload: { command, installRequest: precheck.installRequest },
-          });
-        } else {
-          await permGate.request({
-            type: 'exec', agentId: 'manual',
-            description: `Run: ${command}`, payload: { command },
-          });
-        }
-      } catch (err) {
-        return json(res, 400, { error: err.message });
-      }
+    let assessment;
+    try {
+      assessment = await ensureCommandPermission({ command, projectRoot, skipApproval });
+    } catch (err) {
+      return json(res, 400, { error: err.message });
     }
 
-    // SSE headers
     res.writeHead(200, {
       'Content-Type':                'text/event-stream',
       'Cache-Control':               'no-cache',
@@ -916,25 +1406,33 @@ async function handleAPI(pathname, method, body, q, res, req) {
       try { res.write(`data: ${JSON.stringify({ type: 'line', text, stream })}\n\n`); } catch {}
     };
 
-    const { spawn: spawnProc } = require('child_process');
-    const { assertCommandSafe } = require('./sandbox/sandbox');
-
     try {
-      assertCommandSafe(command);
+      res.write(`data: ${JSON.stringify({
+        type: 'execution_mode',
+        mode: assessment.executionMode,
+        requiresEscalation: assessment.requiresEscalation,
+        reason: assessment.escalationReason || '',
+      })}\n\n`);
     } catch (err) {
       res.write(`data: ${JSON.stringify({ type: 'error', text: err.message })}\n\n`);
       res.end();
       return;
     }
 
-    const proc = spawnProc('sh', ['-c', command], {
-      cwd: path.resolve(projectRoot),
-      env: {
-        PATH: '/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin',
-        NODE_ENV: 'development',
-      },
-      timeout: 30000,
-    });
+    let proc;
+    let executionMode = assessment.executionMode;
+    try {
+      const spawned = await sandbox.spawnCommandApproved(command, projectRoot, {
+        executionMode: assessment.executionMode,
+        timeout: assessment.timeoutMs,
+      });
+      proc = spawned.proc;
+      executionMode = spawned.mode || executionMode;
+    } catch (err) {
+      res.write(`data: ${JSON.stringify({ type: 'error', text: err.message })}\n\n`);
+      res.end();
+      return;
+    }
 
     proc.stdout.on('data', d => {
       d.toString('utf-8').split('\n').filter(Boolean).forEach(line => sendLine(line, 'stdout'));
@@ -944,7 +1442,12 @@ async function handleAPI(pathname, method, body, q, res, req) {
     });
     proc.on('close', code => {
       try {
-        res.write(`data: ${JSON.stringify({ type: 'exit', code: code ?? 0 })}\n\n`);
+        res.write(`data: ${JSON.stringify({
+          type: 'exit',
+          code: code ?? 0,
+          mode: executionMode,
+          requiresEscalation: assessment.requiresEscalation,
+        })}\n\n`);
         res.end();
       } catch {}
     });
@@ -955,12 +1458,10 @@ async function handleAPI(pathname, method, body, q, res, req) {
       } catch {}
     });
 
-    // If client disconnects, kill the process
     req.on('close', () => { try { proc.kill('SIGTERM'); } catch {} });
     return;
   }
 
-  // ── System stop
   if (is('/api/system/stop', 'POST')) {
     const planResult = planner.stopAll('System stop endpoint invoked');
     const agentResult = agentManager.stopAll('System stop endpoint invoked');
@@ -969,9 +1470,48 @@ async function handleAPI(pathname, method, body, q, res, req) {
     return json(res, 200, payload);
   }
 
-  // ── Skills
   if (is('/api/skills', 'GET')) {
     return json(res, 200, skillRegistry.list());
+  }
+  if (is('/api/extensions/catalog', 'GET')) {
+    return json(res, 200, extensionManager.listCatalog());
+  }
+  if (is('/api/extensions/installed', 'GET')) {
+    return json(res, 200, extensionManager.listInstalledPlugins());
+  }
+  if (is('/api/extensions/install', 'POST')) {
+    try {
+      if (body.pluginId) return json(res, 200, extensionManager.installBundled(body.pluginId));
+      if (body.manifestPath) return json(res, 200, extensionManager.installLocalManifest(body.manifestPath, projectRoot));
+      return json(res, 400, { error: 'pluginId or manifestPath required' });
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
+  if (is('/api/extensions/uninstall', 'POST')) {
+    try {
+      if (!body.pluginId) return json(res, 400, { error: 'pluginId required' });
+      return json(res, 200, extensionManager.uninstall(body.pluginId));
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
+  if (is('/api/connectors', 'GET')) {
+    return json(res, 200, connectorManager.list());
+  }
+  const connectorActionM = pathname.match(/^\/api\/connectors\/([^/]+)\/action$/);
+  if (connectorActionM && method === 'POST') {
+    try {
+      return json(res, 200, await connectorManager.run(connectorActionM[1], body.actionId, body.args || {}));
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
+  if (is('/api/resources/list', 'POST')) {
+    try {
+      if (!body.connectorId || !body.resourceId) return json(res, 400, { error: 'connectorId and resourceId are required' });
+      return json(res, 200, await connectorManager.listResources(body.connectorId, body.resourceId, body.args || {}));
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
+  if (is('/api/resources/read', 'POST')) {
+    try {
+      if (!body.connectorId || !body.uri) return json(res, 400, { error: 'connectorId and uri are required' });
+      return json(res, 200, await connectorManager.readResource(body.connectorId, body.uri, body.args || {}));
+    } catch (err) { return json(res, 400, { error: err.message }); }
   }
   const skillRunM = pathname.match(/^\/api\/skills\/([^/]+)\/run$/);
   if (skillRunM) {
@@ -980,7 +1520,6 @@ async function handleAPI(pathname, method, body, q, res, req) {
     } catch (err) { return json(res, 500, { error: err.message }); }
   }
 
-  // ── Automations
   if (is('/api/automations', 'GET')) {
     return json(res, 200, automations.listJobs());
   }
@@ -989,6 +1528,28 @@ async function handleAPI(pathname, method, body, q, res, req) {
   }
   if (is('/api/automations/results', 'GET')) {
     return json(res, 200, automations.listResults());
+  }
+  if (is('/api/automations/notifications', 'GET')) {
+    return json(res, 200, automations.listNotifications());
+  }
+  if (is('/api/artifacts', 'GET')) {
+    return json(res, 200, artifactStore.list(Number(q.limit) || 40));
+  }
+  const artifactM = pathname.match(/^\/api\/artifacts\/([^/]+)$/);
+  if (artifactM && method === 'GET') {
+    const artifact = artifactStore.get(artifactM[1]);
+    if (!artifact) return json(res, 404, { error: 'Not found' });
+    return json(res, 200, artifact);
+  }
+  const autoNotifAckM = pathname.match(/^\/api\/automations\/notifications\/([^/]+)\/ack$/);
+  if (autoNotifAckM && method === 'POST') {
+    const result = automations.acknowledgeNotification(autoNotifAckM[1]);
+    return json(res, result.ok ? 200 : 404, result);
+  }
+  const autoNotifMemoryM = pathname.match(/^\/api\/automations\/notifications\/([^/]+)\/memory$/);
+  if (autoNotifMemoryM && method === 'POST') {
+    const result = automations.promoteNotificationToMemory(autoNotifMemoryM[1]);
+    return json(res, result.ok ? 200 : 404, result);
   }
   const autoM = pathname.match(/^\/api\/automations\/([^/]+)$/);
   if (autoM) {
@@ -1005,7 +1566,6 @@ async function handleAPI(pathname, method, body, q, res, req) {
     }
   }
 
-  // ── GitHub
   function ghClient() {
     const tok = body.token || githubToken;
     if (!tok) throw new Error('GitHub token required');
@@ -1049,8 +1609,32 @@ async function handleAPI(pathname, method, body, q, res, req) {
     try { return json(res, 200, await ghClient().getPRFiles(body.owner, body.repo, body.number)); }
     catch (e) { return json(res, 400, { error: e.message }); }
   }
+  if (is('/api/github/pr/reviews', 'POST')) {
+    try { return json(res, 200, await ghClient().listPRReviews(body.owner, body.repo, body.pullNumber || body.number)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/pr/threads', 'POST')) {
+    try { return json(res, 200, await ghClient().getPRReviewThreads(body.owner, body.repo, body.pullNumber || body.number)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/pr/bundle', 'POST')) {
+    try { return json(res, 200, await ghClient().getPRReviewBundle(body.owner, body.repo, body.pullNumber || body.number)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
   if (is('/api/github/pr/diff', 'POST')) {
     try { return json(res, 200, { diff: await ghClient().getPRDiff(body.owner, body.repo, body.number) }); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/pr/comment', 'POST')) {
+    try { return json(res, 200, await ghClient().addPRReviewComment(body)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/pr/comment/reply', 'POST')) {
+    try { return json(res, 200, await ghClient().replyToReviewComment(body)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/pr/comment/update', 'POST')) {
+    try { return json(res, 200, await ghClient().updateReviewComment(body)); }
     catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (is('/api/github/pr/review', 'POST')) {
@@ -1067,12 +1651,45 @@ async function handleAPI(pathname, method, body, q, res, req) {
     try { return json(res, 200, await ghClient().listBranches(body.owner, body.repo)); }
     catch (e) { return json(res, 400, { error: e.message }); }
   }
+  if (is('/api/github/issues', 'POST')) {
+    try { return json(res, 200, await ghClient().listIssues(body.owner, body.repo, body.state)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/issue/comments', 'POST')) {
+    try { return json(res, 200, await ghClient().listIssueComments(body.owner, body.repo, body.issueNumber)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/issue/comment', 'POST')) {
+    try { return json(res, 200, await ghClient().addIssueComment(body)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/issue/comment/update', 'POST')) {
+    try { return json(res, 200, await ghClient().updateIssueComment(body)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/compare', 'POST')) {
+    try { return json(res, 200, await ghClient().compareCommits(body.owner, body.repo, body.base, body.head)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/search', 'POST')) {
+    try {
+      const type = String(body.type || 'issues');
+      if (type === 'repos') return json(res, 200, await ghClient().searchRepositories(body.query, { limit: body.limit }));
+      return json(res, 200, await ghClient().searchIssues(body.query, { limit: body.limit, sort: body.sort, order: body.order }));
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/reactions', 'POST')) {
+    try { return json(res, 200, await ghClient().addReaction(body)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (is('/api/github/reactions/list', 'POST')) {
+    try { return json(res, 200, await ghClient().listReactions(body)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
 
-  // 404
   json(res, 404, { error: `Not found: ${pathname}` });
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function json(res, status, data) {
   const body = JSON.stringify(data);
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -1088,7 +1705,35 @@ function readBody(req) {
   });
 }
 
-// ── Start ─────────────────────────────────────────────────────────────────────
+function hydrateMessages(messages = []) {
+  return (Array.isArray(messages) ? messages : []).map((message) => ({
+    role: message?.role || 'user',
+    content: Array.isArray(message?.content)
+      ? message.content.map((part) => hydrateMessagePart(part)).filter(Boolean)
+      : String(message?.content || ''),
+  }));
+}
+
+function hydrateMessagePart(part) {
+  if (!part) return null;
+  if (part.type === 'text') {
+    return { type: 'text', text: String(part.text || '') };
+  }
+  if (part.type === 'image') {
+    const attachment = imageStore.readAttachment(part.uploadId || part.id);
+    return {
+      type: 'image',
+      uploadId: attachment.id,
+      name: part.name || attachment.name,
+      mimeType: attachment.mimeType,
+      url: attachment.url,
+      size: attachment.size,
+      dataUrl: attachment.dataUrl,
+    };
+  }
+  return null;
+}
+
 const server = http.createServer(router);
 
 server.listen(PORT, async () => {
@@ -1097,13 +1742,13 @@ server.listen(PORT, async () => {
 ╔══════════════════════════════════════════════════╗
 ║            cLoSe — Zero Dependencies             ║
 ╠══════════════════════════════════════════════════╣
-║  URL:      http://localhost:${PORT}                 ║
+║  URL:      http:
 ║  Project:  ${projectRoot.slice(0,38).padEnd(38)} ║
 ║  Sandbox:  ${sbInfo.mode.padEnd(38)} ║
 ║  Node:     ${process.version.padEnd(38)} ║
 ╚══════════════════════════════════════════════════╝
 `);
-  try { const { exec } = require('child_process'); exec(`open http://localhost:${PORT} 2>/dev/null || xdg-open http://localhost:${PORT} 2>/dev/null || true`); }
+  try { const { exec } = require('child_process'); exec(`open http:
   catch {}
 });
 

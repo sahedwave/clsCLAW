@@ -1,9 +1,4 @@
-/**
- * planner.js — Two-phase task planning
- *
- * Phase 1: Decompose goal into structured JSON task graph (no agents yet)
- * Phase 2: User approves plan → workers spawn per step, respecting dependsOn
- */
+
 'use strict';
 
 const { EventEmitter } = require('events');
@@ -25,7 +20,7 @@ class Planner extends EventEmitter {
     this._plans        = new Map();
   }
 
-  async generatePlan({ goal, projectRoot, apiKey, contextFiles = [] }) {
+  async generatePlan({ goal, projectRoot, apiKey, contextFiles = [], identityContext = '' }) {
     const memory = this._memoryStore
       ? this._memoryStore.query(goal, { projectRoot }) : '';
 
@@ -36,6 +31,9 @@ Return ONLY valid JSON — no explanation, no markdown fences.
 JSON format:
 {
   "goal": "original goal",
+  "summary": "short execution summary",
+  "successCriteria": ["..."],
+  "riskLevel": "low|medium|high",
   "steps": [
     { "id": 1, "type": "analyze", "description": "...", "dependsOn": [] },
     { "id": 2, "type": "code",    "description": "...", "dependsOn": [1] }
@@ -43,7 +41,7 @@ JSON format:
 }
 
 Types: analyze | code | test | review | docs
-dependsOn: array of step ids that must complete first`;
+dependsOn: array of step ids that must complete first${identityContext ? `\n\nWorkspace identity:\n${identityContext}` : ''}`;
 
     const ctxSection = contextFiles.length > 0
       ? '\n\nProject files:\n' + contextFiles
@@ -75,6 +73,13 @@ dependsOn: array of step ids that must complete first`;
     const plan = {
       id:          uuid(),
       goal:        planData.goal || goal,
+      summary:     String(planData.summary || goal).slice(0, 220),
+      successCriteria: Array.isArray(planData.successCriteria)
+        ? planData.successCriteria.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 5)
+        : [],
+      riskLevel:   ['low', 'medium', 'high'].includes(String(planData.riskLevel || '').toLowerCase())
+        ? String(planData.riskLevel).toLowerCase()
+        : 'medium',
       status:      'pending',
       steps:       planData.steps.map(s => ({
         id:          s.id,
@@ -87,11 +92,22 @@ dependsOn: array of step ids that must complete first`;
         output:      null,
         loopState:   null,
       })),
+      progress:    {
+        totalSteps: Array.isArray(planData.steps) ? planData.steps.length : 0,
+        completedSteps: 0,
+        runningSteps: 0,
+        errorSteps: 0,
+        skippedSteps: 0,
+        pendingSteps: Array.isArray(planData.steps) ? planData.steps.length : 0,
+        percent: 0,
+        activeStepIds: [],
+      },
       projectRoot, apiKey, contextFiles,
       createdAt: Date.now(), startedAt: null, completedAt: null,
     };
 
     this._plans.set(plan.id, plan);
+    this._refreshProgress(plan);
     this.emit('plan:created', this._safe(plan));
     return plan;
   }
@@ -114,6 +130,7 @@ dependsOn: array of step ids that must complete first`;
       ...s, role: TYPE_TO_ROLE[s.type] || TYPE_TO_ROLE.default,
       status: 'pending', agentId: null, output: null, loopState: null,
     }));
+    this._refreshProgress(plan);
     this.emit('plan:updated', this._safe(plan));
     return this._safe(plan);
   }
@@ -126,6 +143,7 @@ dependsOn: array of step ids that must complete first`;
         this._agentManager.cancel(s.agentId); s.status = 'skipped';
       } else if (s.status === 'pending') s.status = 'skipped';
     }
+    this._refreshProgress(plan);
     plan.status = 'cancelled'; plan.completedAt = Date.now();
     this.emit('plan:cancelled', this._safe(plan));
     return { ok: true };
@@ -136,6 +154,7 @@ dependsOn: array of step ids that must complete first`;
 
   async _advance(plan) {
     if (plan.status !== 'running') return;
+    this._refreshProgress(plan);
 
     const doneIds  = new Set(plan.steps.filter(s => s.status === 'done').map(s => s.id));
     const hasError = plan.steps.some(s => s.status === 'error');
@@ -143,6 +162,7 @@ dependsOn: array of step ids that must complete first`;
 
     if (allDone) {
       plan.status = 'done'; plan.completedAt = Date.now();
+      this._refreshProgress(plan);
       if (this._memoryStore) {
         this._memoryStore.recordOutcome({
           task:    plan.goal,
@@ -155,6 +175,7 @@ dependsOn: array of step ids that must complete first`;
     if (hasError) {
       for (const s of plan.steps) { if (s.status === 'pending') s.status = 'skipped'; }
       plan.status = 'error'; plan.completedAt = Date.now();
+      this._refreshProgress(plan);
       this.emit('plan:error', this._safe(plan)); return;
     }
 
@@ -167,6 +188,7 @@ dependsOn: array of step ids that must complete first`;
         .map(s => `Step ${s.id} (${s.type}): ${s.output}`).join('\n');
 
       step.status = 'running';
+      this._refreshProgress(plan);
       this.emit('plan:step_started', { planId: plan.id, stepId: step.id });
 
       try {
@@ -179,6 +201,7 @@ dependsOn: array of step ids that must complete first`;
         this._watch(plan, step, agent.id);
       } catch (err) {
         step.status = 'error'; step.output = err.message;
+        this._refreshProgress(plan);
         this.emit('plan:step_error', { planId: plan.id, stepId: step.id, error: err.message });
         await this._advance(plan);
       }
@@ -294,7 +317,7 @@ dependsOn: array of step ids that must complete first`;
       ].join('\n');
 
       const fixAttempt = await this._runAgentAndWait(plan, step, {
-        roleOverride: 'coder',
+        roleOverride: 'code',
         agentName: `Step ${step.id} fix cycle ${cycle}`,
         task: fixTask,
       });
@@ -316,7 +339,7 @@ dependsOn: array of step ids that must complete first`;
       ].join('\n');
 
       lastAttempt = await this._runAgentAndWait(plan, step, {
-        roleOverride: 'tester',
+        roleOverride: 'test',
         agentName: `Step ${step.id} test retry ${cycle + 1}`,
         task: rerunTask,
       });
@@ -402,6 +425,7 @@ dependsOn: array of step ids that must complete first`;
         if (loopResult.ok) {
           step.output = (loopResult.output || `Step ${step.id} completed`).slice(0, 3000);
           step.status = 'done';
+          this._refreshProgress(plan);
           this.emit('plan:step_done', { planId: plan.id, stepId: step.id });
           await this._advance(plan);
           return;
@@ -409,6 +433,7 @@ dependsOn: array of step ids that must complete first`;
 
         step.status = 'error';
         step.output = (loopResult.error || 'Self-correcting test loop failed').slice(0, 3000);
+        this._refreshProgress(plan);
         this.emit('plan:step_error', { planId: plan.id, stepId: step.id, error: step.output });
         await this._advance(plan);
         return;
@@ -416,6 +441,7 @@ dependsOn: array of step ids that must complete first`;
 
       step.output = (a?.reply || `Step ${step.id} completed`).slice(0, 300);
       step.status = 'done';
+      this._refreshProgress(plan);
       this.emit('plan:step_done', { planId: plan.id, stepId: step.id });
       await this._advance(plan);
     };
@@ -425,6 +451,7 @@ dependsOn: array of step ids that must complete first`;
       cleanup();
       step.status = 'error';
       step.output = d.agent?.error || d.error || 'Agent error';
+      this._refreshProgress(plan);
       this.emit('plan:step_error', { planId: plan.id, stepId: step.id, error: step.output });
       await this._advance(plan);
     };
@@ -443,6 +470,28 @@ dependsOn: array of step ids that must complete first`;
   _safe(plan) {
     const { apiKey, ...rest } = plan;
     return { ...rest, steps: rest.steps.map(s => ({ ...s })) };
+  }
+
+  _refreshProgress(plan) {
+    const totalSteps = plan.steps.length;
+    const completedSteps = plan.steps.filter((step) => step.status === 'done').length;
+    const runningSteps = plan.steps.filter((step) => step.status === 'running').length;
+    const errorSteps = plan.steps.filter((step) => step.status === 'error').length;
+    const skippedSteps = plan.steps.filter((step) => step.status === 'skipped').length;
+    const pendingSteps = plan.steps.filter((step) => step.status === 'pending').length;
+    const percent = totalSteps
+      ? Math.round(((completedSteps + skippedSteps) / totalSteps) * 100)
+      : 0;
+    plan.progress = {
+      totalSteps,
+      completedSteps,
+      runningSteps,
+      errorSteps,
+      skippedSteps,
+      pendingSteps,
+      percent,
+      activeStepIds: plan.steps.filter((step) => step.status === 'running').map((step) => step.id),
+    };
   }
 }
 

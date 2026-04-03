@@ -1,20 +1,17 @@
-/**
- * Built-in line diff — no npm deps required.
- * Uses Myers diff algorithm (simplified).
- */
+
 'use strict';
 
 function diffLines(oldText, newText) {
   const oldLines = oldText.split('\n');
   const newLines = newText.split('\n');
 
-  // Build LCS table
+  
   const m = oldLines.length, n = newLines.length;
   const dp = Array.from({length: m+1}, () => new Array(n+1).fill(0));
   for (let i=m-1;i>=0;i--) for (let j=n-1;j>=0;j--)
     dp[i][j] = oldLines[i]===newLines[j] ? dp[i+1][j+1]+1 : Math.max(dp[i+1][j],dp[i][j+1]);
 
-  // Trace back
+  
   const result = [];
   let i=0,j=0;
   while (i<m||j<n) {
@@ -29,7 +26,7 @@ function structuredPatch(oldText, newText, filename='') {
   const allLines = diffLines(oldText, newText);
   const CONTEXT = 3;
 
-  // Group into hunks
+  
   const changed = allLines.map((l,i)=>({...l,idx:i})).filter(l=>l.type!=='context');
   if (!changed.length) return {filename, hunks:[], stats:{added:0,removed:0,hunks:0}};
 

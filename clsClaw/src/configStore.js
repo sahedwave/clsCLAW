@@ -49,6 +49,7 @@ function resolveProviderConfig(preferred = {}) {
   const preferredGithub = firstDefined(input, ['githubToken', 'token']);
   const preferredLocalUrl = firstDefined(input, ['ollamaUrl', 'localUrl']);
   const preferredLocalModel = firstDefined(input, ['ollamaModel', 'localModel']);
+  const preferredEmbeddingProvider = firstDefined(input, ['embeddingProvider', 'semanticProvider']);
 
   return {
     anthropic: normalizeString(
@@ -76,6 +77,12 @@ function resolveProviderConfig(preferred = {}) {
       cfg.ollamaModel ||
       process.env.OLLAMA_MODEL
     ),
+    embeddingProvider: normalizeString(
+      preferredEmbeddingProvider !== undefined ? preferredEmbeddingProvider :
+      cfg.embeddingProvider ||
+      process.env.EMBEDDING_PROVIDER ||
+      'auto'
+    ) || 'auto',
   };
 }
 
@@ -87,6 +94,7 @@ function getMaskedProviderConfig(preferred = {}) {
     githubToken: maskApiKey(resolved.githubToken),
     ollamaUrl: resolved.ollamaUrl,
     ollamaModel: resolved.ollamaModel,
+    embeddingProvider: resolved.embeddingProvider || 'auto',
   };
 }
 
@@ -103,6 +111,7 @@ function getProviderStatus(preferred = {}) {
     openaiConfigured: Boolean(resolved.openai),
     githubConfigured: Boolean(resolved.githubToken),
     localConfigured,
+    embeddingProvider: resolved.embeddingProvider || 'auto',
     llmConfigured: Boolean(resolved.anthropic || resolved.openai || localConfigured),
   };
 }

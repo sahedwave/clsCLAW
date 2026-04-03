@@ -1,0 +1,944 @@
+'use strict';
+
+const { EventEmitter } = require('events');
+const { classifyDeliberation } = require('./deliberationPolicy');
+const { summarizeEvidenceBundle } = require('./evidenceBundle');
+const { evaluateAutonomy } = require('./autonomyGovernor');
+const { normalizeExecutionProfile } = require('./executionProfiles');
+
+const MAX_STEPS = 6;
+const MAX_TOOL_ERRORS = 2;
+const DEFAULT_TIMEOUT_MS = 60000;
+const MAX_PARALLEL_TOOLS = 3;
+const PARALLEL_SAFE_TOOLS = new Set([
+  'workspace_read_file',
+  'workspace_list_files',
+  'web_open',
+  'connector_read_resource',
+  'shell_inspect',
+]);
+
+class TurnOrchestrator extends EventEmitter {
+  constructor({
+    modelRouter,
+    toolRuntime,
+    traceStore,
+  } = {}) {
+    super();
+    this._modelRouter = modelRouter;
+    this._toolRuntime = toolRuntime;
+    this._traceStore = traceStore;
+  }
+
+  async runTurn({
+    providers,
+    policy,
+    messages = [],
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    onEvent = null,
+    onToken = null,
+    signal = null,
+  } = {}) {
+    const emit = (type, payload = {}) => {
+      const event = { type, ...payload };
+      this.emit(type, event);
+      if (typeof onEvent === 'function') onEvent(event);
+    };
+
+    const executionProfile = normalizeExecutionProfile(policy.executionProfile || policy.profile);
+    const deliberation = classifyDeliberation({ policy, messages });
+    const toolLoop = shouldUseToolLoop(policy, messages, deliberation);
+    const turn = this._traceStore.createTurn({
+      mode: policy.mode,
+      profile: executionProfile.id,
+      intent: policy.intent,
+      role: policy.role,
+      userText: policy.userText,
+      toolLoop,
+      summary: buildTurnSummary(policy),
+      deliberation,
+    });
+    this._traceStore.updateDeliberation(turn.id, deliberation);
+    emit('trace_start', {
+      turnId: turn.id,
+      toolLoop,
+      intent: policy.intent,
+      role: policy.role,
+      mode: policy.mode,
+      profile: executionProfile.id,
+    });
+    emit('trace_deliberation', {
+      turnId: turn.id,
+      deliberation,
+    });
+    const syncGovernor = (pendingDecision = null) => {
+      const trace = this._traceStore.getTurn(turn.id);
+      const governorState = evaluateAutonomy({
+        policy,
+        deliberation,
+        evidenceBundle: trace?.evidenceBundle || null,
+        trace,
+        pendingDecision,
+      });
+      this._traceStore.updateGovernor(turn.id, governorState);
+      emit('trace_governor', {
+        turnId: turn.id,
+        governor: governorState,
+      });
+      return governorState;
+    };
+    let governor = syncGovernor();
+
+    const deadline = Date.now() + timeoutMs;
+    const maxSteps = Math.max(2, Number(executionProfile.maxSteps || MAX_STEPS));
+    let toolErrors = 0;
+    let usedTools = false;
+    let finalAnswer = '';
+    let finalProvider = null;
+    let finalModel = null;
+    let nextStepNumber = 1;
+    let forcedInspectPasses = 0;
+    let forcedVerifyPasses = 0;
+
+    const updatePlanState = (patch = {}) => {
+      const plan = this._traceStore.updatePlan(turn.id, patch);
+      emit('trace_plan_state', {
+        turnId: turn.id,
+        plan,
+      });
+      return plan;
+    };
+
+    updatePlanState({
+      phase: deliberation.initialPhase || (toolLoop ? 'planning' : 'direct_reply'),
+      nextAction: toolLoop ? 'select initial tool strategy' : 'compose direct answer',
+      totalUnits: toolLoop ? maxSteps : 1,
+      completedUnits: 0,
+      risk: deliberation.risk,
+      evidenceDemand: deliberation.evidenceDemand,
+      autonomyAllowance: deliberation.autonomyAllowance,
+      executionProfile: executionProfile.id,
+      approvalRequired: governor.shouldPauseForApproval,
+    });
+
+    try {
+      if (deliberation.askUserFirst) {
+        finalAnswer = buildClarifyingQuestion(policy, deliberation);
+        finalProvider = 'policy';
+        finalModel = 'deliberation';
+        updatePlanState({
+          phase: 'ask',
+          nextAction: 'wait for user clarification',
+          confidence: 0.35,
+          completedUnits: 1,
+        });
+      } else if (!toolLoop) {
+        const direct = await this._modelRouter.call({
+          role: policy.role,
+          system: policy.system,
+          prompt: flattenMessages(messages),
+          apiKey: providers,
+          stream: Boolean(onToken),
+          onToken,
+          signal,
+        });
+        finalAnswer = direct.text || '';
+        finalProvider = direct.provider;
+        finalModel = direct.model;
+        updatePlanState({
+          phase: 'responding',
+          completedUnits: 1,
+          nextAction: 'final answer ready',
+          confidence: 0.92,
+        });
+        governor = syncGovernor({ type: 'final' });
+      } else {
+        if (hasImageInputs(messages)) {
+          usedTools = true;
+          updatePlanState({
+            phase: 'gathering_evidence',
+            nextAction: 'inspect attached images',
+          });
+          nextStepNumber = await runToolStep({
+            turnId: turn.id,
+            toolName: 'vision_inspect',
+            args: { prompt: policy.userText || 'Inspect the attached image and extract relevant details.' },
+            reason: 'inspect attached visual evidence before planning the final answer',
+            stepNumber: nextStepNumber,
+            deadline,
+            signal,
+            traceStore: this._traceStore,
+            toolRuntime: this._toolRuntime,
+            providers,
+            messages,
+            emit,
+            updatePlanState,
+            totalUnits: maxSteps,
+          });
+        }
+
+        for (let stepIndex = 0; stepIndex < maxSteps; stepIndex++) {
+          assertNotCancelled(signal);
+          if (Date.now() >= deadline) throw new Error('Turn orchestration timed out');
+
+          updatePlanState({
+            phase: 'planning',
+            nextAction: `decide step ${nextStepNumber}`,
+            completedUnits: Math.max(0, nextStepNumber - 1),
+          });
+
+          const plannerResponse = await this._modelRouter.call({
+            role: 'analyze',
+            system: buildToolPlannerSystem({
+              policy,
+              deliberation,
+              tools: this._toolRuntime.describe(),
+              maxSteps,
+              executionProfile,
+              hasImages: hasImageInputs(messages),
+            }),
+            prompt: buildPlannerPrompt({
+              messages,
+              trace: this._traceStore.getTurn(turn.id),
+              deliberation,
+              remainingMs: Math.max(0, deadline - Date.now()),
+            }),
+            apiKey: providers,
+            stream: false,
+            signal,
+          });
+
+          const decision = parsePlannerDecision(plannerResponse.text);
+          governor = syncGovernor(decision);
+          updatePlanState({
+            lastDecision: decision.type === 'final'
+              ? { type: 'final' }
+              : decision.type === 'batch'
+                ? { type: 'batch', count: decision.items.length }
+                : { type: 'tool', tool: decision.tool },
+            confidence: decision.confidence ?? null,
+            nextAction: describeDecision(decision),
+            approvalRequired: governor.shouldPauseForApproval,
+          });
+          emit('tool_plan', {
+            turnId: turn.id,
+            step: nextStepNumber,
+            plan: decision,
+          });
+
+          if (decision.type === 'final') {
+            if (governor.phaseDirective === 'inspect_more' && forcedInspectPasses < 1) {
+              forcedInspectPasses += 1;
+              this._traceStore.appendStep(turn.id, {
+                kind: 'governor',
+                status: 'done',
+                step: nextStepNumber,
+                summary: 'autonomy governor requested one more inspection step before finalizing',
+              });
+              updatePlanState({
+                phase: 'inspect',
+                nextAction: 'gather one more evidence step before final answer',
+              });
+              continue;
+            }
+            if (governor.phaseDirective === 'verify' && forcedVerifyPasses < 1) {
+              forcedVerifyPasses += 1;
+              this._traceStore.appendStep(turn.id, {
+                kind: 'governor',
+                status: 'done',
+                step: nextStepNumber,
+                summary: 'autonomy governor requested one verification step before finalizing',
+              });
+              updatePlanState({
+                phase: 'verify',
+                nextAction: 'choose one focused verification step before final answer',
+              });
+              continue;
+            }
+            if (governor.phaseDirective === 'await_approval') {
+              finalAnswer = buildApprovalPauseMessage(governor, policy);
+              finalProvider = 'policy';
+              finalModel = 'autonomy-governor';
+              updatePlanState({
+                phase: 'await_approval',
+                nextAction: governor.approvalContext?.kind || 'wait for approval',
+              });
+              break;
+            }
+            finalAnswer = String(decision.answer || '').trim();
+            finalProvider = plannerResponse.provider;
+            finalModel = plannerResponse.model;
+            updatePlanState({
+              phase: 'responding',
+              nextAction: 'planner decided to answer',
+            });
+            break;
+          }
+          if (decision.type === 'ask') {
+            finalAnswer = String(decision.question || '').trim() || buildClarifyingQuestion(policy, deliberation);
+            finalProvider = plannerResponse.provider;
+            finalModel = plannerResponse.model;
+            updatePlanState({
+              phase: 'ask',
+              nextAction: 'wait for user clarification',
+            });
+            break;
+          }
+          if (decision.type === 'await_approval') {
+            finalAnswer = String(decision.message || '').trim() || buildApprovalPauseMessage(governor, policy);
+            finalProvider = plannerResponse.provider;
+            finalModel = plannerResponse.model;
+            updatePlanState({
+              phase: 'await_approval',
+              nextAction: decision.approvalKind || governor.approvalContext?.kind || 'wait for approval',
+            });
+            break;
+          }
+
+          usedTools = true;
+          try {
+            const executionKind = decision.type === 'inspect' || decision.type === 'verify'
+              ? decision.executionKind
+              : decision.type;
+            if (executionKind === 'batch') {
+              nextStepNumber = await runToolBatch({
+                turnId: turn.id,
+                decision,
+                stepNumber: nextStepNumber,
+                deadline,
+                signal,
+                traceStore: this._traceStore,
+                toolRuntime: this._toolRuntime,
+                providers,
+                messages,
+                emit,
+                updatePlanState,
+                totalUnits: maxSteps,
+              });
+            } else {
+              nextStepNumber = await runToolStep({
+                turnId: turn.id,
+                toolName: decision.tool,
+                args: decision.args || {},
+                reason: decision.reason || '',
+                stepNumber: nextStepNumber,
+                deadline,
+                signal,
+                traceStore: this._traceStore,
+                toolRuntime: this._toolRuntime,
+                providers,
+                messages,
+                emit,
+                updatePlanState,
+                totalUnits: maxSteps,
+                phase: decision.type === 'verify' ? 'verify' : decision.type === 'inspect' ? 'inspect' : 'act',
+              });
+            }
+            governor = syncGovernor(decision);
+          } catch (err) {
+            toolErrors++;
+            updatePlanState({
+              phase: 'recovering',
+              failures: toolErrors,
+              nextAction: 'recover from tool failure and re-plan',
+            });
+            if (toolErrors > MAX_TOOL_ERRORS) {
+              throw new Error(`Tool loop stopped after repeated failures: ${err.message}`);
+            }
+          }
+        }
+
+        if (!finalAnswer) {
+          governor = syncGovernor({ type: 'final' });
+          updatePlanState({
+            phase: 'responding',
+            nextAction: 'synthesize answer from collected evidence',
+            completedUnits: Math.max(0, nextStepNumber - 1),
+            approvalRequired: governor.shouldPauseForApproval,
+          });
+          emit('tool_finalizing', {
+            turnId: turn.id,
+            toolsUsed: this._traceStore.getTurn(turn.id)?.steps?.filter((step) => step.kind === 'tool').length || 0,
+          });
+          const synth = await this._modelRouter.call({
+            role: policy.role,
+            system: buildSynthesisSystem(policy, deliberation),
+            prompt: buildSynthesisPrompt({
+              messages,
+              trace: this._traceStore.getTurn(turn.id),
+            }),
+            apiKey: providers,
+            stream: Boolean(onToken),
+            onToken,
+            signal,
+          });
+          finalAnswer = synth.text || '';
+          finalProvider = synth.provider;
+          finalModel = synth.model;
+        }
+      }
+
+      this._traceStore.finalizeTurn(turn.id, {
+        status: 'done',
+        final: {
+          provider: finalProvider,
+          model: finalModel,
+          usedTools,
+          answerPreview: String(finalAnswer || '').slice(0, 200),
+        },
+      });
+      emit('trace_done', {
+        turnId: turn.id,
+        provider: finalProvider,
+        model: finalModel,
+        profile: executionProfile.id,
+        usedTools,
+        deliberation: this._traceStore.getTurn(turn.id)?.deliberation || null,
+        governor: this._traceStore.getTurn(turn.id)?.governor || null,
+        plan: this._traceStore.getTurn(turn.id)?.plan || null,
+        evidenceBundle: this._traceStore.getTurn(turn.id)?.evidenceBundle || null,
+      });
+
+      return {
+        turnId: turn.id,
+        text: finalAnswer,
+        provider: finalProvider,
+        model: finalModel,
+        usedTools,
+        trace: this._traceStore.getTurn(turn.id),
+      };
+    } catch (err) {
+      const status = signal?.aborted ? 'cancelled' : 'error';
+      this._traceStore.finalizeTurn(turn.id, {
+        status,
+        error: err.message,
+        final: {
+          usedTools,
+        },
+      });
+      emit('trace_error', {
+        turnId: turn.id,
+        error: err.message,
+        cancelled: Boolean(signal?.aborted),
+      });
+      throw err;
+    }
+  }
+}
+
+function shouldUseToolLoop(policy, messages = []) {
+  const deliberation = arguments[2] || null;
+  const text = String(policy?.userText || '').toLowerCase();
+  if (deliberation?.inspectFirst) return true;
+  if (deliberation?.needsVerification && ['build', 'review', 'test'].includes(policy?.intent)) return true;
+  if (['repo_analysis', 'review', 'build', 'test', 'docs', 'plan'].includes(policy?.intent)) return true;
+  if (hasImageInputs(messages)) return true;
+  if (/\b(latest|current|today|verify|check online|search|browse|docs)\b/.test(text)) return true;
+  if (/\b(file|files|repo|repository|codebase|directory|project structure)\b/.test(text)) return true;
+  return false;
+}
+
+function buildToolPlannerSystem({ policy, deliberation, tools, maxSteps, executionProfile = null, hasImages = false }) {
+  return [
+    policy.system,
+    `You are deciding the next best action in a bounded tool-use loop.
+Available tools:
+${tools.map((tool) => `- ${tool.name}: ${tool.description}\n  args: ${JSON.stringify(tool.args)}`).join('\n')}
+
+Deliberation policy:
+- Risk: ${deliberation?.risk || 'low'}
+- Ambiguity: ${deliberation?.ambiguity || 'low'}
+- Evidence demand: ${deliberation?.evidenceDemand || 'low'}
+- Autonomy allowance: ${deliberation?.autonomyAllowance || 'full'}
+- Execution profile: ${executionProfile?.id || deliberation?.executionProfile || policy?.executionProfile?.id || policy?.profile || 'deliberate'}
+- Approval sensitive: ${deliberation?.approvalSensitive ? 'yes' : 'no'}
+- Verification needed: ${deliberation?.needsVerification ? 'yes' : 'no'}
+
+Rules:
+- Output JSON only.
+- Choose exactly one: inspect, act, verify, ask, await_approval, or final.
+- Prefer tools before unsupported claims.
+- Keep tool args small and precise.
+- Use shell_inspect only for repository inspection commands.
+- Use connector_action for typed connector calls instead of hallucinating app data.
+- Use connector_list_resources to discover structured connector resources before reading them.
+- Use connector_read_resource to read a specific connector resource URI once you know what you need.
+- Use web_search before answering requests about current facts, recent changes, or internet-visible claims.
+- Use web_open to inspect a promising URL and gather quoteable evidence.
+- Use docs_search for official product or API documentation questions when domains are known.
+- If the conversation includes image attachments and the answer depends on them, use vision_inspect before finalizing.
+- Use inspect when you need more evidence before claiming or editing.
+- Use verify when you need one more evidence step to confirm or de-risk the answer.
+- Use ask only when a missing requirement blocks a correct answer after reasonable inspection.
+- Use await_approval when the next meaningful step is risky enough that the user should explicitly confirm it.
+- If enough evidence is already collected, return a final answer.
+- If several independent read/check operations are needed and they are safe to run in parallel, you may return a batch${executionProfile?.allowParallel ? '' : ', but only when clearly necessary'}.
+- Maximum remaining steps: ${maxSteps}.`,
+    hasImages ? 'This turn includes one or more image attachments.' : '',
+  ].join('\n\n');
+}
+
+function buildPlannerPrompt({ messages, trace, deliberation, remainingMs }) {
+  return [
+    'Conversation:',
+    flattenMessages(messages),
+    '',
+    'Current trace:',
+    summarizeTrace(trace),
+    '',
+    'Deliberation summary:',
+    JSON.stringify(deliberation || {}, null, 2),
+    '',
+    `Time remaining: ${remainingMs}ms`,
+    '',
+    'Return one JSON object only.',
+    'Inspect choice format:',
+    '{"type":"inspect","tool":"workspace_query_context","args":{"query":"...","maxFiles":4},"reason":"why inspection is needed","confidence":0.61}',
+    'Inspect parallel batch format:',
+    '{"type":"inspect","executionKind":"batch","reason":"several safe reads are needed","items":[{"tool":"workspace_read_file","args":{"path":"src/app.js"}},{"tool":"workspace_read_file","args":{"path":"src/auth.js"}}],"confidence":0.64}',
+    'Verify format:',
+    '{"type":"verify","tool":"shell_inspect","args":{"command":"git diff --stat"},"reason":"confirm the scope before finalizing","confidence":0.66}',
+    'Ask format:',
+    '{"type":"ask","question":"Which target file should I change first?","reason":"multiple valid targets remain"}',
+    'Await approval format:',
+    '{"type":"await_approval","message":"I have enough evidence to proceed, but the next step changes multiple files. Approve if you want me to continue.","approvalKind":"multi-file edit"}',
+    'Backward-compatible tool format:',
+    '{"type":"tool","tool":"workspace_query_context","args":{"query":"...","maxFiles":4},"reason":"why this tool is next"}',
+    'Final answer format:',
+    '{"type":"final","answer":"plain text answer grounded in the evidence so far","confidence":0.84}',
+  ].join('\n');
+}
+
+function buildSynthesisSystem(policy, deliberation) {
+  return [
+    policy.system,
+    'You are now synthesizing the final answer from tool observations and evidence.',
+    'Do not invent evidence or citations.',
+    'If evidence is incomplete, say what is still missing.',
+    'If you used tool outputs, ground your answer in them explicitly.',
+    deliberation?.needsVerification
+      ? 'State what you verified, what is still unverified, and what approval or follow-up would be prudent.'
+      : 'Keep the answer direct, but still separate facts from uncertainty when needed.',
+  ].join('\n\n');
+}
+
+function buildSynthesisPrompt({ messages, trace }) {
+  const evidence = (trace?.evidence || []).map((item) => ({
+    citationId: item.citationId,
+    type: item.type,
+    title: item.title,
+    source: item.source,
+    snippet: item.snippet,
+  }));
+  return [
+    'Conversation:',
+    flattenMessages(messages),
+    '',
+    'Evidence bundle summary:',
+    trace?.evidenceBundle?.summary || summarizeEvidenceBundle(trace?.evidenceBundle),
+    '',
+    'Tool trace and evidence:',
+    JSON.stringify({
+      steps: trace?.steps || [],
+      deliberation: trace?.deliberation || null,
+      governor: trace?.governor || null,
+      plan: trace?.plan || null,
+      evidenceBundle: trace?.evidenceBundle || null,
+      evidence,
+    }, null, 2),
+    '',
+    'Write the final user-facing answer now.',
+    'If you rely on web or docs evidence, cite it inline using the provided citation ids like [S1] or [S2].',
+    'Do not invent citations that are not present in the evidence list.',
+  ].join('\n');
+}
+
+function summarizeTrace(trace) {
+  if (!trace) return 'No trace yet.';
+  const lines = [];
+  if (trace.deliberation) {
+    lines.push(`deliberation risk=${trace.deliberation.risk} ambiguity=${trace.deliberation.ambiguity} evidence=${trace.deliberation.evidenceDemand} autonomy=${trace.deliberation.autonomyAllowance}`);
+  }
+  if (trace.governor) {
+    lines.push(`governor phase=${trace.governor.phaseDirective} evidenceStatus=${trace.governor.evidenceStatus} continue=${trace.governor.allowAutonomousContinuation}`);
+  }
+  if (trace.plan) {
+    lines.push(`plan phase=${trace.plan.phase} next=${trace.plan.nextAction} completed=${trace.plan.completedUnits || 0}/${trace.plan.totalUnits || 0}`);
+  }
+  for (const step of trace.steps || []) {
+    if (step.kind === 'tool') {
+      lines.push(`planned tool ${step.tool} args=${JSON.stringify(step.args || {})} reason=${step.reason || ''}`);
+    } else if (step.kind === 'tool_batch') {
+      lines.push(`parallel batch ${step.batchId || ''} count=${step.count || 0} reason=${step.reason || ''}`);
+    } else if (step.kind === 'tool_result') {
+      lines.push(`result ${step.tool}: ${step.summary || ''}`);
+    } else if (step.kind === 'tool_error') {
+      lines.push(`error ${step.tool}: ${step.error || ''}`);
+    }
+  }
+  for (const evidence of trace.evidence || []) {
+    lines.push(`evidence ${evidence.type} ${evidence.source}: ${String(evidence.snippet || '').slice(0, 120)}`);
+  }
+  return lines.length ? lines.join('\n') : 'No tool activity yet.';
+}
+
+function parsePlannerDecision(text) {
+  const parsed = extractJsonObject(text);
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Planner did not return valid JSON');
+  }
+  if (parsed.type === 'final') {
+    return {
+      type: 'final',
+      answer: String(parsed.answer || '').trim(),
+      confidence: normalizeConfidence(parsed.confidence),
+    };
+  }
+  if (parsed.type === 'ask') {
+    return {
+      type: 'ask',
+      question: String(parsed.question || '').trim(),
+      reason: String(parsed.reason || '').trim(),
+      confidence: normalizeConfidence(parsed.confidence),
+    };
+  }
+  if (parsed.type === 'await_approval') {
+    return {
+      type: 'await_approval',
+      message: String(parsed.message || '').trim(),
+      approvalKind: String(parsed.approvalKind || '').trim(),
+      confidence: normalizeConfidence(parsed.confidence),
+    };
+  }
+  if (parsed.type === 'inspect' || parsed.type === 'verify') {
+    return normalizePhaseDecision(parsed);
+  }
+  if (parsed.type === 'batch') {
+    const items = Array.isArray(parsed.items) ? parsed.items : [];
+    if (!items.length) throw new Error('Planner batch must include items');
+    if (items.length > MAX_PARALLEL_TOOLS) {
+      throw new Error(`Planner batch exceeded max parallel tools (${MAX_PARALLEL_TOOLS})`);
+    }
+    const normalizedItems = items.map((item) => {
+      const tool = String(item?.tool || '').trim();
+      if (!PARALLEL_SAFE_TOOLS.has(tool)) {
+        throw new Error(`Tool "${tool}" is not allowed in a parallel batch`);
+      }
+      return {
+        tool,
+        args: item?.args && typeof item.args === 'object' ? item.args : {},
+        reason: String(item?.reason || '').trim(),
+      };
+    });
+    return {
+      type: 'batch',
+      items: normalizedItems,
+      reason: String(parsed.reason || '').trim(),
+      confidence: normalizeConfidence(parsed.confidence),
+    };
+  }
+  if (parsed.type === 'tool') {
+    return {
+      type: 'tool',
+      tool: String(parsed.tool || '').trim(),
+      args: parsed.args && typeof parsed.args === 'object' ? parsed.args : {},
+      reason: String(parsed.reason || '').trim(),
+      confidence: normalizeConfidence(parsed.confidence),
+    };
+  }
+  throw new Error('Planner JSON must use type="inspect", "verify", "ask", "await_approval", "tool", "batch", or "final"');
+}
+
+function extractJsonObject(text) {
+  const source = String(text || '').trim();
+  const fenced = source.match(/```json\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : source;
+  try {
+    return JSON.parse(candidate);
+  } catch {}
+
+  const firstBrace = candidate.indexOf('{');
+  const lastBrace = candidate.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(candidate.slice(firstBrace, lastBrace + 1));
+    } catch {}
+  }
+  return null;
+}
+
+function flattenMessages(messages = []) {
+  return messages.map((msg) => {
+    const role = msg?.role || 'user';
+    const content = Array.isArray(msg?.content)
+      ? msg.content.map((part) => {
+          if (part?.type === 'image') return `[image: ${part.name || part.uploadId || 'attachment'}]`;
+          return part?.text || '';
+        }).join('\n')
+      : String(msg?.content || '');
+    return `${role.toUpperCase()}:\n${content}`.trim();
+  }).join('\n\n');
+}
+
+function hasImageInputs(messages = []) {
+  return Array.isArray(messages) && messages.some((msg) =>
+    Array.isArray(msg?.content) && msg.content.some((part) => part?.type === 'image')
+  );
+}
+
+async function runToolStep({
+  turnId,
+  toolName,
+  args,
+  reason,
+  stepNumber,
+  deadline,
+  signal,
+  traceStore,
+  toolRuntime,
+  providers,
+  messages,
+  emit,
+  updatePlanState,
+  totalUnits,
+  phase = 'inspect',
+}) {
+  const startedAt = Date.now();
+  traceStore.appendStep(turnId, {
+    kind: 'tool',
+    status: 'running',
+    step: stepNumber,
+    tool: toolName,
+    args,
+    reason,
+  });
+  emit('tool_start', {
+    turnId,
+    step: stepNumber,
+    tool: toolName,
+    args,
+    reason,
+  });
+
+  try {
+    updatePlanState?.({
+      phase,
+      nextAction: `run ${toolName}`,
+    });
+    const result = await toolRuntime.execute(toolName, args, {
+      timeoutMs: Math.min(15000, Math.max(3000, deadline - Date.now())),
+      providers,
+      messages,
+      signal,
+    });
+    traceStore.appendStep(turnId, {
+      kind: 'tool_result',
+      status: result.ok === false ? 'error' : 'done',
+      step: stepNumber,
+      tool: toolName,
+      durationMs: Date.now() - startedAt,
+      summary: result.summary,
+      observation: result.observation,
+    });
+    for (const evidence of result.evidence || []) {
+      const appended = traceStore.appendEvidence(turnId, evidence);
+      emit('evidence_added', {
+        turnId,
+        evidence: appended,
+      });
+    }
+    emit('tool_result', {
+      turnId,
+      step: stepNumber,
+      tool: toolName,
+      ok: result.ok !== false,
+      summary: result.summary,
+      observation: result.observation,
+    });
+    updatePlanState?.({
+      phase: phase === 'verify' ? 'verify' : 'gathering_evidence',
+      completedUnits: Math.min(totalUnits || MAX_STEPS, stepNumber),
+      nextAction: 'evaluate evidence and decide next step',
+    });
+    return stepNumber + 1;
+  } catch (err) {
+    traceStore.appendStep(turnId, {
+      kind: 'tool_error',
+      status: 'error',
+      step: stepNumber,
+      tool: toolName,
+      durationMs: Date.now() - startedAt,
+      error: err.message,
+    });
+    emit('tool_error', {
+      turnId,
+      step: stepNumber,
+      tool: toolName,
+      error: err.message,
+    });
+    updatePlanState?.({
+      failures: (traceStore.getTurn(turnId)?.plan?.failures || 0) + 1,
+      nextAction: `recover after ${toolName} failure`,
+    });
+    throw err;
+  }
+}
+
+async function runToolBatch({
+  turnId,
+  decision,
+  stepNumber,
+  deadline,
+  signal,
+  traceStore,
+  toolRuntime,
+  providers,
+  messages,
+  emit,
+  updatePlanState,
+  totalUnits,
+}) {
+  const batchId = `batch-${stepNumber}`;
+  const items = decision.items || [];
+  traceStore.appendStep(turnId, {
+    kind: 'tool_batch',
+    status: 'running',
+    batchId,
+    step: stepNumber,
+    count: items.length,
+    reason: decision.reason || '',
+    items,
+  });
+  emit('tool_batch_start', {
+    turnId,
+    step: stepNumber,
+    batchId,
+    count: items.length,
+    items,
+    reason: decision.reason || '',
+  });
+  updatePlanState?.({
+    phase: 'parallel_reads',
+    parallelBatches: (traceStore.getTurn(turnId)?.plan?.parallelBatches || 0) + 1,
+    nextAction: `run ${items.length} parallel read${items.length === 1 ? '' : 's'}`,
+  });
+
+  const results = await Promise.allSettled(items.map((item, index) => runToolStep({
+    turnId,
+    toolName: item.tool,
+    args: item.args || {},
+    reason: item.reason || decision.reason || `parallel read ${index + 1}`,
+    stepNumber: stepNumber + index,
+    deadline,
+    signal,
+    traceStore,
+    toolRuntime,
+    providers,
+    messages,
+    emit,
+    updatePlanState,
+    totalUnits,
+  })));
+
+  const failed = results.filter((entry) => entry.status === 'rejected');
+  traceStore.appendStep(turnId, {
+    kind: 'tool_batch_result',
+    status: failed.length ? 'error' : 'done',
+    batchId,
+    step: stepNumber,
+    completed: results.length - failed.length,
+    failed: failed.length,
+  });
+  emit('tool_batch_result', {
+    turnId,
+    step: stepNumber,
+    batchId,
+    completed: results.length - failed.length,
+    failed: failed.length,
+  });
+  if (failed.length) {
+    throw failed[0].reason;
+  }
+  updatePlanState?.({
+    phase: 'gathering_evidence',
+    completedUnits: Math.min(totalUnits || MAX_STEPS, stepNumber + items.length - 1),
+    nextAction: 'parallel reads complete; re-plan from evidence',
+  });
+  return stepNumber + items.length;
+}
+
+function assertNotCancelled(signal) {
+  if (signal?.aborted) {
+    throw new Error('Turn cancelled');
+  }
+}
+
+function buildTurnSummary(policy = {}) {
+  return String(policy?.userText || '').replace(/\s+/g, ' ').trim().slice(0, 220) || 'turn';
+}
+
+function describeDecision(decision) {
+  if (!decision) return 'decide next action';
+  if (decision.type === 'final') return 'final answer ready';
+  if (decision.type === 'ask') return 'clarify the missing requirement';
+  if (decision.type === 'await_approval') return `wait for approval: ${decision.approvalKind || 'risky next step'}`;
+  if (decision.type === 'inspect') return `inspect with ${decision.executionKind === 'batch' ? 'parallel reads' : decision.tool}`;
+  if (decision.type === 'verify') return `verify with ${decision.executionKind === 'batch' ? 'parallel checks' : decision.tool}`;
+  if (decision.type === 'batch') return `parallel batch of ${decision.items.length} safe read${decision.items.length === 1 ? '' : 's'}`;
+  return `run ${decision.tool}`;
+}
+
+function normalizeConfidence(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Math.min(1, parsed));
+}
+
+function normalizePhaseDecision(parsed) {
+  const type = parsed.type === 'verify' ? 'verify' : 'inspect';
+  const executionKind = parsed.executionKind === 'batch' || parsed.type === 'batch'
+    ? 'batch'
+    : 'tool';
+  if (executionKind === 'batch') {
+    const batch = parsePlannerDecision(JSON.stringify({
+      type: 'batch',
+      items: parsed.items,
+      reason: parsed.reason,
+      confidence: parsed.confidence,
+    }));
+    return {
+      ...batch,
+      type,
+      executionKind: 'batch',
+    };
+  }
+  return {
+    type,
+    executionKind: 'tool',
+    tool: String(parsed.tool || '').trim(),
+    args: parsed.args && typeof parsed.args === 'object' ? parsed.args : {},
+    reason: String(parsed.reason || '').trim(),
+    confidence: normalizeConfidence(parsed.confidence),
+  };
+}
+
+function buildClarifyingQuestion(policy, deliberation) {
+  const base = String(policy?.userText || '').trim() || 'your request';
+  if (deliberation?.risk === 'high' || deliberation?.ambiguity === 'high') {
+    return `I want to make the right change for ${base}, but an important requirement is still unclear. Which specific target or outcome should I prioritize first?`;
+  }
+  return `Before I proceed, what is the most important exact outcome you want from: ${base}?`;
+}
+
+function buildApprovalPauseMessage(governor, policy) {
+  if (governor?.approvalContext?.summary) return governor.approvalContext.summary;
+  const base = String(policy?.userText || '').trim() || 'this task';
+  return `I have enough context to continue with ${base}, but the next step should wait for your approval.`;
+}
+
+module.exports = {
+  TurnOrchestrator,
+  shouldUseToolLoop,
+  parsePlannerDecision,
+  extractJsonObject,
+};

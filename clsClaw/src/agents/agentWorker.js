@@ -1,11 +1,4 @@
-/**
- * agentWorker.js — Runs inside a Worker Thread
- *
- * v5 upgrades:
- *   - Role-typed system prompts: analyze, code, test, review, docs
- *   - Streaming: forwards tokens via parentPort as they arrive
- *   - Memory injection: receives relevant memories in workerData
- */
+
 'use strict';
 
 const { workerData, parentPort } = require('worker_threads');
@@ -13,18 +6,27 @@ const { workerData, parentPort } = require('worker_threads');
 if (!workerData || !parentPort) { module.exports = {}; return; }
 
 const path = require('path');
+const { materializePatchDocument } = require('../diff/patchProposal');
+const modelRouter = require('../llm/modelRouter');
 
-const { agentId, agentName, task, projectRoot, apiKey, contextFiles, role, memory, activeAgentContext = [] } = workerData;
+const { agentId, agentName, task, projectRoot, apiKey, contextFiles, role, memory, activeAgentContext = [], identityContext = '' } = workerData;
 
 function send(type, payload = {}) { parentPort.postMessage({ type, agentId, ...payload }); }
 function log(msg, level = 'info') { send('log', { msg, level, time: Date.now() }); }
 
-// ── Role prompts ──────────────────────────────────────────────────────────────
+
 const BASE_RULES = `
 RULES:
 1. For every file you want to create or modify, output a code block with this EXACT comment on the first line:
-   // SAVE_AS: relative/path/to/file.ext
+
    Content goes through human approval + diff review before writing to disk.
+   For smaller surgical edits, you may instead emit a \`\`\`patch block using:
+   *** Begin Patch
+   *** Update File: relative/path/to/file.ext
+   @@
+   -old line
+   +new line
+   *** End Patch
 2. For shell commands: use bash blocks with:  # RUN: command
 3. Before any code or commands, briefly explain your understanding, approach, justification, and self-check.
 4. Be explicit. No placeholders. Produce complete working code.
@@ -59,16 +61,25 @@ function buildSystem() {
     : `\n\nACTIVE AGENT COORDINATION:\n${activeAgentContext.map(a =>
       `- ${a.name} [${a.status}] role=${a.role}\n  task: ${String(a.task || '').slice(0, 180)}\n  files: ${(a.files || []).join(', ') || '(none yet)'}`
     ).join('\n')}\n\nAvoid duplicate work and reduce file conflicts. Prefer files not already listed above unless the task explicitly requires overlap.`;
-  return (ROLE_PROMPTS[role] || ROLE_PROMPTS.code)(agentName, agentId, projectRoot) + awareness;
+  const identity = identityContext ? `\n\nWORKSPACE IDENTITY:\n${identityContext}` : '';
+  return (ROLE_PROMPTS[role] || ROLE_PROMPTS.code)(agentName, agentId, projectRoot) + identity + awareness;
 }
 
-// ── Parser ────────────────────────────────────────────────────────────────────
 function parseOutput(text) {
   const proposals = [], commands = [];
   const re = /```(\w+)?\n([\s\S]*?)```/g;
   let m;
   while ((m = re.exec(text)) !== null) {
     const lang = (m[1]||'').toLowerCase(), body = m[2];
+    if (lang === 'patch' || body.includes('*** Begin Patch')) {
+      try {
+        const patchProposals = materializePatchDocument(body, projectRoot);
+        proposals.push(...patchProposals);
+      } catch (err) {
+        log(`Patch parse failed: ${err.message}`, 'error');
+      }
+      continue;
+    }
     const save = body.match(/^(?:\/\/|#|<!--)\s*SAVE_AS:\s*(.+?)(?:\s*-->)?\s*$/m);
     if (save) {
       const rel = save[1].trim();
@@ -81,7 +92,6 @@ function parseOutput(text) {
   return { proposals, commands };
 }
 
-// ── Memory extraction ─────────────────────────────────────────────────────────
 function extractMemory(text, proposals) {
   const decisions = [];
   const re = /(?:chose|decided|using|selected|went with|picked)\s+(.{10,80}?)(?:\.|because|since)/gi;
@@ -96,7 +106,6 @@ function extractMemory(text, proposals) {
   };
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
 async function runAgent() {
   log(`"${agentName}" started [role: ${role||'code'}]`);
   send('status', { status: 'running' });
@@ -110,30 +119,19 @@ async function runAgent() {
   const userMessage = `${task}${ctxSection}${memSection}`;
 
   try {
-    log('Calling Claude (streaming)...');
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01' },
-      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:8096, stream:true, system:buildSystem(), messages:[{role:'user',content:userMessage}] }),
+    log('Calling model router (streaming)...');
+    const res = await modelRouter.call({
+      role: role || 'code',
+      system: buildSystem(),
+      prompt: userMessage,
+      apiKey,
+      stream: true,
+      onToken: (text) => {
+        if (text) send('token', { text });
+      },
     });
-
-    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
-
-    let replyText = '', buffer = '';
-    for await (const chunk of res.body) {
-      buffer += chunk.toString('utf-8');
-      const lines = buffer.split('\n'); buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const evt = JSON.parse(line.slice(6));
-          if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-            replyText += evt.delta.text;
-            send('token', { text: evt.delta.text });   // ← live token to browser
-          }
-        } catch {}
-      }
-    }
+    const replyText = res.text || '';
+    send('meta', { provider: res.provider, model: res.model });
 
     if (!replyText) throw new Error('Empty response');
     log(`Done (${replyText.length} chars)`);
