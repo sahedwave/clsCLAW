@@ -184,7 +184,7 @@ class ConnectorManager {
           const targetDir = resolvePathInsideRoot(args.dir || ctx.projectRoot, ctx.projectRoot);
           ctx.sandbox.assertPathSafe(targetDir, ctx.projectRoot);
           const entries = require('fs').readdirSync(targetDir, { withFileTypes: true })
-            .filter((entry) => !new Set(['node_modules', '.git', '.DS_Store', '.closeclaw-worktrees']).has(entry.name))
+            .filter((entry) => !new Set(['node_modules', '.git', '.DS_Store', '.clsclaw-worktrees']).has(entry.name))
             .map((entry) => ({
               name: entry.name,
               type: entry.isDirectory() ? 'dir' : 'file',
@@ -250,7 +250,7 @@ class ConnectorManager {
         const targetDir = resolvePathInsideRoot(args.dir || ctx.projectRoot, ctx.projectRoot);
         ctx.sandbox.assertPathSafe(targetDir, ctx.projectRoot);
         return require('fs').readdirSync(targetDir, { withFileTypes: true })
-          .filter((entry) => !new Set(['node_modules', '.git', '.DS_Store', '.closeclaw-worktrees']).has(entry.name))
+          .filter((entry) => !new Set(['node_modules', '.git', '.DS_Store', '.clsclaw-worktrees']).has(entry.name))
           .map((entry) => {
             const relativePath = path.relative(ctx.projectRoot, path.join(targetDir, entry.name)) || entry.name;
             return {

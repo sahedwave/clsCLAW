@@ -7,10 +7,10 @@ const IDENTITY_TEMPLATES = [
   {
     name: 'IDENTITY.md',
     label: 'Identity',
-    description: 'Name, vibe, and workspace identity for cLoSe',
+    description: 'Name, vibe, and workspace identity for clsClaw',
     defaultContent: `# IDENTITY
 
-Name: cLoSe
+Name: clsClaw
 Product: clsClaw
 Creator: Md Shahed Rahman
 Vibe: Evidence-first, product-minded, calm, and direct
@@ -22,11 +22,11 @@ Keep this short and durable. This is the quick identity card for the workspace.
   {
     name: 'USER.md',
     label: 'User',
-    description: 'How cLoSe should address and support the user',
+    description: 'How clsClaw should address and support the user',
     defaultContent: `# USER
 
 - Preferred product name: clsClaw
-- Preferred assistant name: cLoSe
+- Preferred assistant name: clsClaw
 - Preferred style: clear, practical, and honest
 - Preferred workflow: explain first for analysis, justify before making code changes
 `,

@@ -19,7 +19,7 @@ class GitHubClient {
       Authorization: `token ${this._token}`,
       Accept: accept,
       'Content-Type': 'application/json',
-      'User-Agent': 'cLoSe',
+      'User-Agent': 'clsClaw',
       'X-GitHub-Api-Version': '2022-11-28',
     };
   }

@@ -54,7 +54,7 @@ async function applyDiff(filePath, newContent, projectRoot, { agentId, agentName
   } else {
 
     if (fs.existsSync(resolved)) {
-      fs.copyFileSync(resolved, resolved + '.closeclaw-bak.' + Date.now());
+      fs.copyFileSync(resolved, resolved + '.clsclaw-bak.' + Date.now());
     }
   }
 

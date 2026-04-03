@@ -32,7 +32,7 @@ test('ensureIdentityFiles bootstraps the clsClaw workspace identity set', () => 
     assert.equal(created.length, 5);
     assert.equal(files.filter((file) => file.exists).length, 5);
     assert.match(files.find((file) => file.name === 'IDENTITY.md').content, /\bclsClaw\b/);
-    assert.match(files.find((file) => file.name === 'IDENTITY.md').content, /\bcLoSe\b/);
+    assert.match(files.find((file) => file.name === 'IDENTITY.md').content, /\bclsClaw\b/);
     assert.match(files.find((file) => file.name === 'HEARTBEAT.md').content, /- \[ \]/);
   } finally {
     cleanup(workspace);
@@ -62,7 +62,7 @@ test('applyAuditFixes adds missing red lines and safe ignore rules', () => {
 
     assert.equal(result.agentsUpdated, true);
     assert.ok(result.createdFiles.length >= 1);
-    assert.match(gitignore, /\.closeclaw-worktrees\//);
+    assert.match(gitignore, /\.clsclaw-worktrees\//);
     assert.match(gitignore, /data\//);
     assert.ok(redLines.includes('rm -rf'));
     assert.ok(redLines.includes('curl | sh'));

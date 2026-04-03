@@ -726,7 +726,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
     const dir = q.dir || projectRoot;
     try {
       sandbox.assertPathSafe(dir, projectRoot);
-      const IGNORE = new Set(['node_modules','.git','__pycache__','.DS_Store','.closeclaw-worktrees']);
+      const IGNORE = new Set(['node_modules','.git','__pycache__','.DS_Store','.clsclaw-worktrees']);
       const entries = fs.readdirSync(dir, { withFileTypes: true })
         .filter(e => !IGNORE.has(e.name))
         .map(e => {
@@ -1740,7 +1740,7 @@ server.listen(PORT, async () => {
   const sbInfo = await sandbox.getSandboxInfo();
   console.log(`
 ╔══════════════════════════════════════════════════╗
-║            cLoSe — Zero Dependencies             ║
+║           clsClaw — Zero Dependencies            ║
 ╠══════════════════════════════════════════════════╣
 ║  URL:      http:
 ║  Project:  ${projectRoot.slice(0,38).padEnd(38)} ║

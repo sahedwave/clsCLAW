@@ -4,7 +4,7 @@ const { normalizeExecutionProfile } = require('../orchestration/executionProfile
 
 const CANONICAL_FACTS = {
   productName: 'clsClaw',
-  assistantName: 'cLoSe',
+  assistantName: 'clsClaw',
   creatorName: 'Md Shahed Rahman',
 };
 
@@ -90,7 +90,7 @@ function maybeAnswerCanonicalQuestion({ messages = [] } = {}) {
   const userText = extractUserIntentText(messages);
   const text = userText.toLowerCase();
   const mentionsProduct = /\bclsclaw\b/.test(text);
-  const mentionsAssistant = /\bclose\b/.test(text);
+  const mentionsAssistant = /\bclsclaw\b/.test(text);
   const asksAboutCreator = /\b(creator|founder|maker|owner|author|developer)\b/.test(text);
   const asksWhoBuilt = /\bwho (created|made|built)\b/.test(text);
 
@@ -128,7 +128,7 @@ function buildPolicySystem({ projectRoot = '', messages = [], mode = 'ask', prof
   const role = intentToRole(intent);
   const userText = extractUserIntentText(messages);
 
-  const shared = `You are cLoSe, a high-agency software engineering assistant for a local workspace.
+  const shared = `You are clsClaw, a high-agency software engineering assistant for a local workspace.
 Project root: ${projectRoot}
 
 Canonical product facts:

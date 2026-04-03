@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 echo ""
-echo "  closeCLAW Local v4"
+echo "  clsClaw Local v4"
 echo "  =========================="
 if ! command -v node >/dev/null 2>&1; then
   echo "  Node.js was not found in PATH"
@@ -9,7 +9,7 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 if [ ! -f src/server.js ]; then
-  echo "  Run this script from the closeCLAW directory"
+  echo "  Run this script from the clsClaw directory"
   exit 1
 fi
 node --version | grep -qE "v(1[89]|[2-9][0-9])\." || { echo "  Node 18+ required"; exit 1; }

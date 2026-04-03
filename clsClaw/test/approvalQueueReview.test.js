@@ -65,7 +65,7 @@ test('approval queue adds approval context to file proposals by default', async 
       filePath,
       newContent: 'const x = 2;\n',
       agentId: 'agent-1',
-      agentName: 'cLoSe',
+      agentName: 'clsClaw',
       description: 'Update app.js',
       projectRoot: dir,
     });

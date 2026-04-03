@@ -26,7 +26,7 @@ function auditWorkspace({ projectRoot, sandboxInfo, providerStatus = {}, automat
       'warn',
       'Missing workspace identity files',
       `Missing: ${missingIdentity.map((file) => file.name).join(', ')}`,
-      'Create the missing identity files so cLoSe has durable product behavior and guard rails.',
+      'Create the missing identity files so clsClaw has durable product behavior and guard rails.',
     ));
   }
 
@@ -40,13 +40,13 @@ function auditWorkspace({ projectRoot, sandboxInfo, providerStatus = {}, automat
     ));
   }
 
-  if (!gitignoreContent.includes('.closeclaw-worktrees/')) {
+  if (!gitignoreContent.includes('.clsclaw-worktrees/')) {
     findings.push(makeFinding(
       'gitignore-worktrees',
       'warn',
       'Worktree ignore rule missing',
-      '.gitignore does not include .closeclaw-worktrees/, which can leak temporary branches and generated files.',
-      'Add .closeclaw-worktrees/ to .gitignore.',
+      '.gitignore does not include .clsclaw-worktrees/, which can leak temporary branches and generated files.',
+      'Add .clsclaw-worktrees/ to .gitignore.',
     ));
   }
 
@@ -132,7 +132,7 @@ function applyAuditFixes(projectRoot) {
     agentsUpdated = true;
   }
 
-  if (!existing.includes('.closeclaw-worktrees/')) additions.push('.closeclaw-worktrees/');
+  if (!existing.includes('.clsclaw-worktrees/')) additions.push('.clsclaw-worktrees/');
   if (!existing.includes('data/')) additions.push('data/');
 
   if (additions.length > 0) {

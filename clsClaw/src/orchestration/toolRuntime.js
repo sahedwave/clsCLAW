@@ -161,7 +161,7 @@ class ToolRuntime {
     const dir = resolveInsideProject(projectRoot, args.dir || '.');
     this._sandbox.assertPathSafe(dir, projectRoot);
     const entries = require('fs').readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => !new Set(['node_modules', '.git', '.DS_Store', '.closeclaw-worktrees']).has(entry.name))
+      .filter((entry) => !new Set(['node_modules', '.git', '.DS_Store', '.clsclaw-worktrees']).has(entry.name))
       .map((entry) => ({
         name: entry.name,
         type: entry.isDirectory() ? 'dir' : 'file',

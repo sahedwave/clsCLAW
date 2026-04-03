@@ -19,7 +19,7 @@ const CODE_EXTS = new Set([
 ]);
 const IGNORE_DIRS = new Set([
   'node_modules','.git','__pycache__','.next','dist','build',
-  'coverage','.cache','venv','.env','.closeclaw-worktrees',
+  'coverage','.cache','venv','.env','.clsclaw-worktrees',
 ]);
 
 const MAX_FILE_SIZE = 150 * 1024;

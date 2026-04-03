@@ -30,16 +30,16 @@ async function createWorktree(projectRoot, agentId, agentName) {
   }
 
   const safeName = agentName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30);
-  const branchName = `closeclaw/agent-${safeName}-${agentId.slice(0, 8)}`;
-  const worktreeDir = path.join(projectRoot, '.closeclaw-worktrees', agentId);
+  const branchName = `clsclaw/agent-${safeName}-${agentId.slice(0, 8)}`;
+  const worktreeDir = path.join(projectRoot, '.clsclaw-worktrees', agentId);
 
   try {
 
-    const wtParent = path.join(projectRoot, '.closeclaw-worktrees');
+    const wtParent = path.join(projectRoot, '.clsclaw-worktrees');
     if (!fs.existsSync(wtParent)) fs.mkdirSync(wtParent, { recursive: true });
 
     const gitignore = path.join(projectRoot, '.gitignore');
-    const ignoreEntry = '.closeclaw-worktrees/';
+    const ignoreEntry = '.clsclaw-worktrees/';
     if (fs.existsSync(gitignore)) {
       const content = fs.readFileSync(gitignore, 'utf-8');
       if (!content.includes(ignoreEntry)) {

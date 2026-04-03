@@ -144,10 +144,10 @@ test('maybeAnswerCanonicalQuestion returns the exact creator response for clsCla
   assert.equal(reply.intent, 'identity');
   assert.match(reply.text, new RegExp(CANONICAL_FACTS.creatorName));
   assert.match(reply.text, /\bclsClaw\b/);
-  assert.match(reply.text, /\bcLoSe\b/);
+  assert.match(reply.text, /\bclsClaw\b/);
 });
 
-test('buildPolicySystem includes canonical clsClaw and cLoSe facts', () => {
+test('buildPolicySystem includes canonical clsClaw facts', () => {
   const policy = buildPolicySystem({
     projectRoot: '/tmp/demo',
     mode: 'ask',
@@ -155,6 +155,6 @@ test('buildPolicySystem includes canonical clsClaw and cLoSe facts', () => {
   });
 
   assert.match(policy.system, /\bclsClaw\b/);
-  assert.match(policy.system, /\bcLoSe\b/);
+  assert.match(policy.system, /\bclsClaw\b/);
   assert.match(policy.system, new RegExp(CANONICAL_FACTS.creatorName));
 });
