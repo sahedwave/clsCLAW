@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>cLoSe</title>
+<title>clsClaw</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -17,15 +17,39 @@
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);overflow:hidden}
 body{min-height:100vh;min-height:100dvh}
+body{
+  --left-col:220px;
+  --right-col:300px;
+}
+body.left-collapsed{--left-col:0px}
+body.right-collapsed{--right-col:0px}
+body.presenter-mode{
+  --left-col:0px;
+  --right-col:0px;
+}
+body:not(.advanced-nav-expanded) .advanced-nav{display:none}
 
 
-.shell{display:grid;grid-template-columns:48px 220px 1fr 300px;grid-template-rows:46px 1fr;height:100vh}
+.shell{display:grid;grid-template-columns:48px var(--left-col) 1fr var(--right-col);grid-template-rows:46px 1fr;height:100vh}
+body.left-collapsed .filepanel,
+body.presenter-mode .filepanel{display:none}
+body.right-collapsed .rpanel,
+body.presenter-mode .rpanel{display:none}
+body.presenter-mode .advanced-nav{display:none}
+body.presenter-mode .topbar{padding:0 18px}
+body.presenter-mode .topbar-right > :not(#presenter-toggle):not(#health-pill){display:none}
+body.presenter-mode .mission-control{padding:16px 22px 18px}
+body.presenter-mode .chat-msgs{padding:24px 34px}
+body.presenter-mode .welcome{max-width:1080px}
+body.presenter-mode .hero-title{font-size:44px;max-width:11ch}
+body.presenter-mode .hero-banner{grid-template-columns:minmax(0,1.95fr) minmax(240px,0.7fr)}
 
 
 .nav{grid-row:1/-1;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:2px}
 .nb{width:36px;height:36px;border-radius:9px;border:none;background:transparent;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:17px;transition:all .15s;position:relative;flex-shrink:0}
 .nb:hover{background:var(--bg3);color:var(--text)}
 .nb.active{background:rgba(124,106,247,0.15);color:var(--accent2)}
+.nb.more{font-size:14px}
 .nb .n-badge{position:absolute;top:3px;right:3px;min-width:14px;height:14px;border-radius:7px;background:var(--red);color:white;font-size:8px;font-family:var(--mono);display:flex;align-items:center;justify-content:center;padding:0 3px;border:1.5px solid var(--bg2)}
 .nav-sep{width:28px;height:1px;background:var(--border);margin:4px 0}
 
@@ -45,6 +69,19 @@ body{min-height:100vh;min-height:100dvh}
 .ctx-btn{font-size:10px;font-family:var(--mono);padding:4px 9px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s;white-space:nowrap}
 .ctx-btn:hover{color:var(--accent2);border-color:rgba(124,106,247,0.4)}
 .ctx-btn.on{color:var(--accent2);border-color:rgba(124,106,247,0.4);background:rgba(124,106,247,0.08)}
+.ctx-btn.presenter{color:var(--blue);border-color:rgba(96,165,250,0.26)}
+.ctx-btn.presenter.on{color:var(--text);border-color:rgba(96,165,250,0.4);background:rgba(96,165,250,0.12)}
+.shell-tools{position:relative}
+.shell-tools summary{list-style:none;cursor:pointer}
+.shell-tools summary::-webkit-details-marker{display:none}
+.shell-tools-summary{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--muted);font-size:10px;font-family:var(--mono)}
+.shell-tools[open] .shell-tools-summary{color:var(--accent2);border-color:rgba(124,106,247,0.35);background:rgba(124,106,247,0.08)}
+.shell-tools-menu{position:absolute;right:0;top:calc(100% + 8px);min-width:220px;padding:10px;background:var(--bg2);border:1px solid var(--border2);border-radius:12px;box-shadow:0 16px 34px rgba(0,0,0,0.28);display:flex;flex-direction:column;gap:8px;z-index:30}
+.shell-tools-section{display:flex;flex-direction:column;gap:6px}
+.shell-tools-label{font-size:9px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--hint)}
+.shell-tools-row{display:flex;flex-wrap:wrap;gap:6px}
+.ctx-btn.compact{padding:4px 8px}
+#health-indicator{display:none}
 .live{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green)}
 
 
@@ -74,14 +111,14 @@ body{min-height:100vh;min-height:100dvh}
 
 
 .main{display:flex;flex-direction:column;overflow:hidden;background:var(--bg);min-width:0}
-.mission-control{display:flex;align-items:flex-start;gap:14px;padding:14px 18px;border-bottom:1px solid var(--border);background:
+.mission-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 14px;padding:14px 18px;border-bottom:1px solid var(--border);background:
 radial-gradient(circle at top left, rgba(124,106,247,0.16), transparent 42%),
 linear-gradient(180deg, rgba(124,106,247,0.08), rgba(17,17,23,0.92));flex-shrink:0}
 .mission-main{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}
 .mission-title{font-size:10px;font-family:var(--mono);color:var(--accent2);text-transform:uppercase;letter-spacing:.12em}
 .mission-summary{font-size:14px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
 .mission-sub{font-size:11px;font-family:var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mission-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.mission-chips{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .mission-chip{font-size:10px;font-family:var(--mono);padding:4px 8px;border-radius:999px;border:1px solid var(--border2);color:var(--muted);background:var(--bg3)}
 .mission-chip.phase{color:var(--blue);border-color:rgba(96,165,250,0.35)}
 .mission-chip.profile{color:var(--amber);border-color:rgba(251,191,36,0.35)}
@@ -90,6 +127,14 @@ linear-gradient(180deg, rgba(124,106,247,0.08), rgba(17,17,23,0.92));flex-shrink
 .mission-actions{display:flex;gap:6px;align-items:center;flex-shrink:0}
 .mission-btn{font-size:10px;font-family:var(--mono);padding:5px 9px;border-radius:8px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}
 .mission-btn:hover{color:var(--text);background:var(--bg3)}
+#mission-detail{grid-column:1/-1;max-height:160px;overflow:auto;padding-right:4px}
+#mission-detail::-webkit-scrollbar{width:4px}
+#mission-detail::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
+.mission-mini-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:4px}
+.mission-mini-card{border:1px solid var(--border);border-radius:12px;padding:9px 11px;background:linear-gradient(180deg,rgba(15,23,42,0.48),rgba(15,23,42,0.2));min-width:0}
+.mission-mini-label{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--hint);font-family:var(--mono)}
+.mission-mini-value{margin-top:4px;font-size:11px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mission-mini-detail{margin-top:4px;font-size:10px;line-height:1.45;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 
 
 .chat-wrap{flex:1;overflow:hidden;display:flex;flex-direction:column;background:
@@ -107,7 +152,9 @@ radial-gradient(circle at top left, rgba(124,106,247,0.08), transparent 34%)}
 .chip:hover{border-color:var(--accent);background:var(--bg3)}
 .chip-cat{font-size:9px;font-family:var(--mono);color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.08em}
 .chip-txt{font-size:12px;color:var(--text);line-height:1.5}
-.discover-panel{width:100%;max-width:720px;background:linear-gradient(180deg,rgba(124,106,247,0.08),rgba(17,17,23,0.85));border:1px solid rgba(124,106,247,0.18);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.discover-panel{width:100%;max-width:720px;background:linear-gradient(180deg,rgba(124,106,247,0.08),rgba(17,17,23,0.85));border:1px solid rgba(124,106,247,0.18);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px;max-height:min(46vh,520px);overflow:auto}
+.discover-panel::-webkit-scrollbar,.tool-trace::-webkit-scrollbar,.sources-panel::-webkit-scrollbar,.visual-panel::-webkit-scrollbar,.evidence-deck::-webkit-scrollbar,.transparency-panel::-webkit-scrollbar,.closeout-panel::-webkit-scrollbar,.next-actions-panel::-webkit-scrollbar,.review-section::-webkit-scrollbar{width:4px}
+.discover-panel::-webkit-scrollbar-thumb,.tool-trace::-webkit-scrollbar-thumb,.sources-panel::-webkit-scrollbar-thumb,.visual-panel::-webkit-scrollbar-thumb,.evidence-deck::-webkit-scrollbar-thumb,.transparency-panel::-webkit-scrollbar-thumb,.closeout-panel::-webkit-scrollbar-thumb,.next-actions-panel::-webkit-scrollbar-thumb,.review-section::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
 .discover-heading{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
 .discover-kicker{font-size:10px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent2);margin-bottom:4px}
 .discover-summary{font-size:12px;line-height:1.6;color:var(--muted)}
@@ -191,7 +238,7 @@ pre.cb-body::-webkit-scrollbar-thumb{background:var(--border2)}
 .codeblock.streaming .cb-hdr{background:rgba(124,106,247,0.06)}
 
 
-.tool-trace{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.tool-trace{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;max-height:48vh;overflow:auto}
 .tool-trace-hdr{display:flex;align-items:center;gap:8px;font-size:10px;font-family:var(--mono);color:var(--accent2);text-transform:uppercase;letter-spacing:.08em}
 .tool-trace-status{margin-left:auto;color:var(--muted)}
 .tool-trace-body{display:flex;flex-direction:column;gap:6px}
@@ -206,7 +253,7 @@ pre.cb-body::-webkit-scrollbar-thumb{background:var(--border2)}
 .tool-step.done .tool-step-badge{color:var(--green);border-color:rgba(52,211,153,0.35)}
 .tool-step.error .tool-step-badge{color:var(--red);border-color:rgba(248,113,113,0.35)}
 .tool-step-desc{font-size:11px;line-height:1.6;color:var(--muted);white-space:pre-wrap}
-.sources-panel{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.sources-panel{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;max-height:48vh;overflow:auto}
 .sources-title{font-size:10px;font-family:var(--mono);color:var(--blue);text-transform:uppercase;letter-spacing:.08em}
 .source-card{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
 .source-top{display:flex;align-items:center;gap:8px;font-size:11px;font-family:var(--mono);margin-bottom:4px}
@@ -215,7 +262,7 @@ pre.cb-body::-webkit-scrollbar-thumb{background:var(--border2)}
 .source-link:hover{color:var(--accent2)}
 .source-domain{color:var(--muted);font-size:10px}
 .source-snippet{font-size:11px;line-height:1.6;color:var(--muted)}
-.visual-panel{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.visual-panel{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;max-height:48vh;overflow:auto}
 .visual-title{font-size:10px;font-family:var(--mono);color:var(--green);text-transform:uppercase;letter-spacing:.08em}
 .visual-card{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
 .visual-card-top{display:flex;align-items:center;gap:8px;font-size:11px;font-family:var(--mono);margin-bottom:4px}
@@ -225,7 +272,7 @@ pre.cb-body::-webkit-scrollbar-thumb{background:var(--border2)}
 .debug-step{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:9px 10px;display:flex;flex-direction:column;gap:6px}
 .debug-step-stage{font-size:10px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent2)}
 .debug-step-detail{font-size:11px;line-height:1.6;color:var(--text)}
-.evidence-deck{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.evidence-deck{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;max-height:48vh;overflow:auto}
 .evidence-deck-title{font-size:10px;font-family:var(--mono);color:var(--accent2);text-transform:uppercase;letter-spacing:.08em}
 .evidence-deck-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
 .evidence-card{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:9px 10px;display:flex;flex-direction:column;gap:6px}
@@ -237,19 +284,23 @@ pre.cb-body::-webkit-scrollbar-thumb{background:var(--border2)}
 .evidence-card-links{display:flex;gap:6px;flex-wrap:wrap}
 .evidence-card-link{display:inline-flex;align-items:center;gap:6px;padding:4px 7px;border-radius:999px;border:1px solid var(--border2);background:rgba(255,255,255,0.02);font-size:10px;font-family:var(--mono);color:var(--blue);text-decoration:none}
 .evidence-card-link:hover{color:var(--accent2)}
-.transparency-panel{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.transparency-panel{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;gap:8px;max-height:48vh;overflow:auto}
+.transparency-summary{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;cursor:pointer;list-style:none}
+.transparency-summary::-webkit-details-marker{display:none}
 .transparency-title{font-size:10px;font-family:var(--mono);color:var(--amber);text-transform:uppercase;letter-spacing:.08em}
+.transparency-hint{font-size:10px;font-family:var(--mono);color:var(--hint)}
+.transparency-body{padding:0 12px 12px;display:flex;flex-direction:column;gap:8px}
 .transparency-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
 .transparency-card{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
 .transparency-label{font-size:10px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
 .transparency-value{font-size:11px;line-height:1.6;color:var(--text)}
-.closeout-panel{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.closeout-panel{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;max-height:48vh;overflow:auto}
 .closeout-title{font-size:10px;font-family:var(--mono);color:var(--accent2);text-transform:uppercase;letter-spacing:.08em}
 .closeout-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
 .closeout-card{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
 .closeout-label{font-size:10px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
 .closeout-value{font-size:11px;line-height:1.6;color:var(--text)}
-.next-actions-panel{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:10px}
+.next-actions-panel{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:10px;max-height:42vh;overflow:auto}
 .next-actions-title{font-size:10px;font-family:var(--mono);color:var(--green);text-transform:uppercase;letter-spacing:.08em}
 .next-actions-row{display:flex;gap:8px;flex-wrap:wrap}
 .next-action-btn{padding:7px 10px;border-radius:999px;border:1px solid var(--border2);background:rgba(255,255,255,0.02);color:var(--text);font-size:10px;font-family:var(--mono);cursor:pointer;transition:all .15s}
@@ -269,10 +320,19 @@ textarea#prompt::placeholder{color:var(--hint)}
 .send-btn:hover{background:var(--accent2)}
 .send-btn:disabled{opacity:.35;cursor:not-allowed}
 .send-btn svg{width:13px;height:13px;fill:white}
-.input-foot{display:flex;align-items:center;gap:7px;padding:3px 11px 7px;border-top:1px solid var(--border)}
+.input-foot{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:3px 11px 7px;border-top:1px solid var(--border)}
 .hint{font-size:10px;font-family:var(--mono);color:var(--hint)}
 .kbd{display:inline-flex;background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:1px 4px;font-size:9px;color:var(--muted)}
-.mode-switch{display:flex;gap:6px;align-items:center}
+.composer-advanced{margin-left:auto}
+.composer-advanced summary{list-style:none;cursor:pointer}
+.composer-advanced summary::-webkit-details-marker{display:none}
+.composer-advanced-summary{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:999px;border:1px solid var(--border);background:transparent;color:var(--hint);font-size:10px;font-family:var(--mono)}
+.composer-advanced[open] .composer-advanced-summary{color:var(--accent2);border-color:rgba(124,106,247,0.28);background:rgba(124,106,247,0.06)}
+.composer-advanced-body{display:flex;flex-direction:column;gap:9px;padding:10px 0 0;min-width:min(100%,560px)}
+.composer-section{display:flex;flex-direction:column;gap:6px}
+.composer-section-label{font-size:9px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--hint)}
+.composer-mini-status{font-size:10px;font-family:var(--mono);color:var(--muted);line-height:1.5}
+.mode-switch{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .mode-btn{font-size:10px;font-family:var(--mono);padding:4px 9px;border-radius:999px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}
 .mode-btn:hover{color:var(--text);background:var(--bg3)}
 .mode-btn.active{color:var(--accent2);border-color:rgba(124,106,247,0.35);background:rgba(124,106,247,0.08)}
@@ -280,9 +340,9 @@ textarea#prompt::placeholder{color:var(--hint)}
 .profile-btn{font-size:10px;font-family:var(--mono);padding:4px 8px;border-radius:999px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}
 .profile-btn:hover{color:var(--text);background:var(--bg3)}
 .profile-btn.active{color:var(--amber);border-color:rgba(251,191,36,0.35);background:rgba(251,191,36,0.08)}
-.composer-guide{padding:8px 11px 10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:7px;background:linear-gradient(180deg,rgba(124,106,247,0.03),rgba(17,17,23,0))}
-.composer-row{display:flex;gap:8px;align-items:flex-start}
-.composer-label{min-width:68px;font-size:10px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--hint);padding-top:4px}
+.composer-guide{padding:8px 0 0;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;background:linear-gradient(180deg,rgba(124,106,247,0.03),rgba(17,17,23,0))}
+.composer-row{display:flex;gap:6px;align-items:flex-start;flex-direction:column}
+.composer-label{font-size:9px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--hint)}
 .composer-chips{display:flex;gap:6px;flex-wrap:wrap}
 .composer-chip{font-size:10px;font-family:var(--mono);padding:4px 8px;border-radius:999px;border:1px solid var(--border2);background:transparent;color:var(--accent2);cursor:pointer;transition:all .15s}
 .composer-chip:hover{color:var(--text);background:var(--bg3)}
@@ -348,7 +408,7 @@ textarea#prompt::placeholder{color:var(--hint)}
 .review-metric-label{font-size:9px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
 .review-metric-value{font-size:14px;font-weight:700;color:var(--text)}
 .review-metric-sub{font-size:10px;font-family:var(--mono);color:var(--hint)}
-.review-section{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;display:flex;flex-direction:column;gap:8px}
+.review-section{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;display:flex;flex-direction:column;gap:8px;max-height:40vh;overflow:auto}
 .review-section-title{font-size:10px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
 .review-source-list{display:flex;flex-wrap:wrap;gap:6px}
 .review-source-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:999px;border:1px solid var(--border2);background:var(--bg3);font-size:10px;font-family:var(--mono);color:var(--muted)}
@@ -520,7 +580,9 @@ textarea.editor-ta{flex:1;background:var(--bg3);border:none;outline:none;color:v
 
 
 .modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:200}
-.modal{background:var(--bg2);border:1px solid var(--border3);border-radius:14px;padding:22px;width:460px;max-width:95vw}
+.modal{background:var(--bg2);border:1px solid var(--border3);border-radius:14px;padding:22px;width:460px;max-width:95vw;max-height:90vh;overflow:auto}
+.modal::-webkit-scrollbar{width:5px}
+.modal::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
 .modal h3{font-size:14px;font-weight:700;margin-bottom:14px}
 .modal label{font-size:10px;font-family:var(--mono);color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em}
 .modal input,.modal select,.modal textarea{width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;padding:7px 10px;border-radius:7px;outline:none;margin-bottom:9px}
@@ -667,17 +729,18 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
     </button>
     <div class="nav-sep"></div>
     <button class="nb" id="nav-agents" onclick="setView('agents')" title="Agents">⚡</button>
-    <button class="nb" id="nav-worktrees" onclick="setView('worktrees')" title="Git Worktrees">🌿</button>
-    <button class="nb" id="nav-skills" onclick="setView('skills')" title="Skills">🎯</button>
-    <button class="nb" id="nav-apps" onclick="setView('apps')" title="Apps & Connectors">🔌</button>
-    <button class="nb" id="nav-auto" onclick="setView('auto')" title="Automations">⏱</button>
+    <button class="nb advanced-nav" id="nav-worktrees" onclick="setView('worktrees')" title="Git Worktrees">🌿</button>
+    <button class="nb advanced-nav" id="nav-skills" onclick="setView('skills')" title="Skills">🎯</button>
+    <button class="nb advanced-nav" id="nav-apps" onclick="setView('apps')" title="Apps & Connectors">🔌</button>
+    <button class="nb advanced-nav" id="nav-auto" onclick="setView('auto')" title="Automations">⏱</button>
     <div class="nav-sep"></div>
     <button class="nb" id="nav-github" onclick="setView('github')" title="GitHub">🐙</button>
     <button class="nb" id="nav-ctx" onclick="setView('ctx')" title="Context Engine">🧠</button>
     <button class="nb" id="nav-plan" onclick="setView('plan')" title="Planner">🗺️</button>
-    <button class="nb" id="nav-memory" onclick="setView('memory')" title="Memory">💾</button>
-    <button class="nb" id="nav-identity" onclick="setView('identity')" title="Identity">🧬</button>
-    <button class="nb" id="nav-security" onclick="setView('security')" title="Security Audit">🛡️</button>
+    <button class="nb more" id="nav-more" onclick="toggleAdvancedNav()" title="More sections">⋯</button>
+    <button class="nb advanced-nav" id="nav-memory" onclick="setView('memory')" title="Memory">💾</button>
+    <button class="nb advanced-nav" id="nav-identity" onclick="setView('identity')" title="Identity">🧬</button>
+    <button class="nb advanced-nav" id="nav-security" onclick="setView('security')" title="Security Audit">🛡️</button>
     <div style="flex:1"></div>
     <button class="nb" onclick="openSettings()" title="Settings">⚙️</button>
   </nav>
@@ -692,10 +755,33 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
       <span class="cwd-path" id="cwd-disp">loading...</span>
     </div>
     <div class="topbar-right">
-      <button class="ctx-btn" id="auth-badge" onclick="openSettings()">auth: guest</button>
-      <button class="ctx-btn" id="idx-btn" onclick="buildIndex()">index project</button>
-      <div id="api-key-warning" class="apiwarn" style="display:none">⚠ No LLM provider configured</div>
-      <div id="health-indicator" class="ctx-btn">health: unknown</div>
+      <button class="ctx-btn presenter" id="presenter-toggle" onclick="togglePresenterMode()">presenter</button>
+      <details class="shell-tools" id="shell-tools">
+        <summary class="shell-tools-summary">shell</summary>
+        <div class="shell-tools-menu">
+          <div class="shell-tools-section">
+            <div class="shell-tools-label">layout</div>
+            <div class="shell-tools-row">
+              <button class="ctx-btn compact" id="left-panel-toggle" onclick="toggleLeftPanel()">hide files</button>
+              <button class="ctx-btn compact" id="right-panel-toggle" onclick="toggleRightPanel()">hide sidecar</button>
+            </div>
+          </div>
+          <div class="shell-tools-section">
+            <div class="shell-tools-label">project</div>
+            <div class="shell-tools-row">
+              <button class="ctx-btn compact" id="idx-btn" onclick="buildIndex()">index project</button>
+              <button class="ctx-btn compact" id="auth-badge" onclick="openSettings()">auth: guest</button>
+            </div>
+          </div>
+          <div class="shell-tools-section">
+            <div class="shell-tools-label">health</div>
+            <div class="shell-tools-row">
+              <div id="health-indicator" class="ctx-btn compact">health: unknown</div>
+              <div id="api-key-warning" class="apiwarn" style="display:none">⚠ No LLM provider configured</div>
+            </div>
+          </div>
+        </div>
+      </details>
       <div id="health-pill" class="sb-mode" style="cursor:pointer" onclick="showHealth()" title="System health">● ok</div>
       <div class="live" id="live-dot" title="WebSocket"></div>
     </div>
@@ -738,6 +824,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
         <div class="welcome" id="welcome">
           <div id="home-shell-host"></div>
           <div id="onboarding-host"></div>
+          <div id="engineering-showcase-host"></div>
           <div id="discoverability-welcome"></div>
           <div id="workspace-pulse"></div>
         </div>
@@ -756,19 +843,31 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
           <input id="image-upload-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple style="display:none" onchange="handleImageSelection(event)">
           <div class="input-foot">
             <span class="hint"><span class="kbd">↵</span> send &nbsp;·&nbsp; <span class="kbd">⇧↵</span> newline</span>
-            <div class="mode-switch">
-              <button class="mode-btn active" id="mode-ask" onclick="setChatMode('ask')">ask</button>
-              <button class="mode-btn" id="mode-build" onclick="setChatMode('build')">build</button>
-            </div>
-            <div class="profile-switch">
-              <button class="profile-btn" id="profile-quick" onclick="setExecutionProfile('quick')">quick</button>
-              <button class="profile-btn active" id="profile-deliberate" onclick="setExecutionProfile('deliberate')">deliberate</button>
-              <button class="profile-btn" id="profile-execute" onclick="setExecutionProfile('execute')">execute</button>
-              <button class="profile-btn" id="profile-parallel" onclick="setExecutionProfile('parallel')">parallel</button>
-            </div>
             <span class="hint" style="margin-left:auto" id="ctx-status">no index</span>
+            <details class="composer-advanced" id="composer-advanced">
+              <summary class="composer-advanced-summary">tools</summary>
+              <div class="composer-advanced-body">
+                <div class="composer-mini-status" id="composer-mini-status">auto intent · deliberate profile</div>
+                <div class="composer-section">
+                  <div class="composer-section-label">task style</div>
+                  <div class="mode-switch">
+                    <button class="mode-btn active" id="mode-ask" onclick="setChatMode('ask')">ask</button>
+                    <button class="mode-btn" id="mode-build" onclick="setChatMode('build')">build</button>
+                  </div>
+                </div>
+                <div class="composer-section">
+                  <div class="composer-section-label">speed / depth</div>
+                  <div class="profile-switch">
+                    <button class="profile-btn" id="profile-quick" onclick="setExecutionProfile('quick')">quick</button>
+                    <button class="profile-btn active" id="profile-deliberate" onclick="setExecutionProfile('deliberate')">deliberate</button>
+                    <button class="profile-btn" id="profile-execute" onclick="setExecutionProfile('execute')">execute</button>
+                    <button class="profile-btn" id="profile-parallel" onclick="setExecutionProfile('parallel')">parallel</button>
+                  </div>
+                </div>
+                <div id="composer-guide-host"></div>
+              </div>
+            </details>
           </div>
-          <div id="composer-guide-host"></div>
         </div>
       </div>
     </div>
@@ -1173,7 +1272,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
 </div>
 
 
-<div class="modal-ov" id="modal-settings" style="display:none">
+<div class="modal-ov" id="modal-settings" style="display:none" onclick="if(event.target===this)closeModal('modal-settings')">
   <div class="modal">
     <h3>Settings</h3>
     <label>Project root</label>
@@ -1229,7 +1328,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
   </div>
 </div>
 
-<div class="modal-ov" id="modal-auth" style="display:none">
+<div class="modal-ov" id="modal-auth" style="display:none" onclick="if(event.target===this && authState.authenticated)closeModal('modal-auth')">
   <div class="modal">
     <h3 id="auth-title">Sign in</h3>
     <div id="auth-copy" style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:10px">Authenticate to unlock the local clsClaw workspace.</div>
@@ -1261,7 +1360,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
 </div>
 
 
-<div class="modal-ov" id="modal-agent" style="display:none">
+<div class="modal-ov" id="modal-agent" style="display:none" onclick="if(event.target===this)closeModal('modal-agent')">
   <div class="modal">
     <h3>Launch Agent</h3>
     <label>Task</label>
@@ -1292,7 +1391,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
 </div>
 
 
-<div class="modal-ov" id="modal-job" style="display:none">
+<div class="modal-ov" id="modal-job" style="display:none" onclick="if(event.target===this)closeModal('modal-job')">
   <div class="modal">
     <h3>New Automation</h3>
     <label>Name</label>
@@ -1314,7 +1413,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
 </div>
 
 
-<div class="modal-ov" id="modal-diff" style="display:none">
+<div class="modal-ov" id="modal-diff" style="display:none" onclick="if(event.target===this)closeModal('modal-diff')">
   <div class="modal diff-modal">
     <h3 id="diff-modal-title">Review change</h3>
 
@@ -1425,6 +1524,10 @@ let busy = false;
 let currentView = window.clsClawStateStore?.get('currentView') || 'chat';
 let chatMode = window.clsClawStateStore?.get('chatMode') || 'ask';
 let executionProfile = window.clsClawStateStore?.get('executionProfile') || 'deliberate';
+let presenterMode = Boolean(window.clsClawStateStore?.get('presenterMode'));
+let advancedNavExpanded = Boolean(window.clsClawStateStore?.get('advancedNavExpanded'));
+let leftPanelCollapsed = presenterMode ? true : Boolean(window.clsClawStateStore?.get('leftPanelCollapsed'));
+let rightPanelCollapsed = presenterMode ? true : Boolean(window.clsClawStateStore?.get('rightPanelCollapsed'));
 let currentAttachments = [];
 let indexStats = null;
 let agentsMap = new Map();
@@ -1446,11 +1549,13 @@ let homeWorkspaceSignals = {
 };
 let missionState = {
   turnId: null,
+  lane: null,
   summary: 'Idle. Start a task to see live orchestration state.',
   subtext: 'No active turn',
   profile: executionProfile,
   phase: 'idle',
   nextAction: 'wait',
+  ui: null,
   evidenceStatus: null,
   evidenceSummary: '',
   approvalRequired: false,
@@ -1607,6 +1712,15 @@ async function init(isRetry = false) {
   currentBrowseDir = projectRoot;
   document.getElementById('cwd-disp').textContent = shortPath(projectRoot);
   document.getElementById('cfg-root').value = projectRoot;
+  applyLayoutChrome();
+  if (presenterMode) {
+    currentView = 'chat';
+    window.clsClawStateStore?.set('currentView', 'chat');
+    setView('chat');
+    ensurePresenterSurface();
+  } else {
+    setView(currentView || 'chat');
+  }
   setChatMode(chatMode, false);
   setExecutionProfile(executionProfile, false);
   renderMissionControl();
@@ -3965,36 +4079,219 @@ function getPromptPlaceholder(mode = chatMode) {
 function renderDiscoverabilityPanels() {
   const homeHost = document.getElementById('home-shell-host');
   const onboardingHost = document.getElementById('onboarding-host');
+  const engineeringHost = document.getElementById('engineering-showcase-host');
   const welcomeHost = document.getElementById('discoverability-welcome');
   const composerHost = document.getElementById('composer-guide-host');
-  if (homeHost && window.clsClawModules?.renderHomeShell) {
-    homeHost.innerHTML = window.clsClawModules.renderHomeShell({
-      missionState,
-      executionProfile,
-      chatMode,
-      projectRoot,
-      authState,
-      providerStatus,
-      workspaceSignals: homeWorkspaceSignals,
-    });
+  try {
+    if (homeHost && window.clsClawModules?.renderHomeShell) {
+      homeHost.innerHTML = window.clsClawModules.renderHomeShell({
+        missionState,
+        executionProfile,
+        chatMode,
+        projectRoot,
+        authState,
+        providerStatus,
+        workspaceSignals: homeWorkspaceSignals,
+      });
+    }
+    if (onboardingHost && window.clsClawModules?.renderOnboardingPanel) {
+      onboardingHost.innerHTML = window.clsClawModules.renderOnboardingPanel({
+        projectRoot,
+        authState,
+        providerStatus,
+        dismissed: onboardingDismissed,
+      });
+    }
+    if (engineeringHost && window.clsClawModules?.renderEngineeringShowcase) {
+      engineeringHost.innerHTML = window.clsClawModules.renderEngineeringShowcase({
+        presenterMode,
+      });
+    }
+    if (welcomeHost && window.clsClawModules?.renderWelcomePanel) {
+      welcomeHost.innerHTML = window.clsClawModules.renderWelcomePanel();
+    }
+    if (composerHost && window.clsClawModules?.renderComposerGuide) {
+      composerHost.innerHTML = window.clsClawModules.renderComposerGuide({
+        mode: chatMode,
+        profile: executionProfile,
+      });
+    }
+  } catch (err) {
+    console.error('Failed to render discoverability panels', err);
+    const welcome = document.getElementById('welcome');
+    if (welcome) {
+      welcome.innerHTML = buildWelcomeShellMarkup();
+      const home = document.getElementById('home-shell-host');
+      const info = document.getElementById('discoverability-welcome');
+      if (home) {
+        home.innerHTML = `
+          <div class="discover-panel" style="max-width:920px">
+            <div class="discover-heading">
+              <div>
+                <div class="discover-kicker">Workspace Ready</div>
+                <div class="discover-summary">clsClaw restored the presenter surface after a UI rendering issue.</div>
+              </div>
+            </div>
+            <div class="hero-actions">
+              <button class="hero-action" onclick="applyQuickTemplate('matlabReview')">inspect MATLAB solver</button>
+              <button class="hero-action" onclick="applyQuickTemplate('simVerify')">verify simulation</button>
+              <button class="hero-action" onclick="applyQuickTemplate('review')">review workspace</button>
+            </div>
+          </div>
+        `;
+      }
+      if (info) {
+        info.innerHTML = `
+          <div class="discover-panel">
+            <div class="discover-heading">
+              <div>
+                <div class="discover-kicker">Recovered</div>
+                <div class="discover-summary">The main chat surface was rebuilt so presenter mode never leaves you on a blank screen.</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    }
   }
-  if (onboardingHost && window.clsClawModules?.renderOnboardingPanel) {
-    onboardingHost.innerHTML = window.clsClawModules.renderOnboardingPanel({
-      projectRoot,
-      authState,
-      providerStatus,
-      dismissed: onboardingDismissed,
-    });
+}
+
+function buildWelcomeShellMarkup() {
+  return `
+    <div id="home-shell-host"></div>
+    <div id="onboarding-host"></div>
+    <div id="engineering-showcase-host"></div>
+    <div id="discoverability-welcome"></div>
+    <div id="workspace-pulse"></div>
+  `;
+}
+
+function ensureWelcomeSurface() {
+  const chatMsgs = document.getElementById('chat-msgs');
+  if (!chatMsgs) return;
+  const visibleMessages = [...chatMsgs.querySelectorAll('.msg')];
+  if (visibleMessages.length) {
+    const welcome = document.getElementById('welcome');
+    if (welcome) welcome.remove();
+    return;
   }
-  if (welcomeHost && window.clsClawModules?.renderWelcomePanel) {
-    welcomeHost.innerHTML = window.clsClawModules.renderWelcomePanel();
+  let welcome = document.getElementById('welcome');
+  if (!welcome) {
+    welcome = document.createElement('div');
+    welcome.className = 'welcome';
+    welcome.id = 'welcome';
+    welcome.innerHTML = buildWelcomeShellMarkup();
+    chatMsgs.prepend(welcome);
+  } else if (!welcome.querySelector('#home-shell-host')) {
+    welcome.innerHTML = buildWelcomeShellMarkup();
   }
-  if (composerHost && window.clsClawModules?.renderComposerGuide) {
-    composerHost.innerHTML = window.clsClawModules.renderComposerGuide({
-      mode: chatMode,
-      profile: executionProfile,
-    });
+  chatMsgs.style.display = 'flex';
+  welcome.style.display = 'flex';
+  renderDiscoverabilityPanels();
+  const renderedHosts = welcome.querySelectorAll('#home-shell-host > *, #onboarding-host > *, #engineering-showcase-host > *, #discoverability-welcome > *, #workspace-pulse > *');
+  if (!renderedHosts.length) {
+    const home = document.getElementById('home-shell-host');
+    if (home) {
+      home.innerHTML = `
+        <div class="discover-panel" style="max-width:920px">
+          <div class="discover-heading">
+            <div>
+              <div class="discover-kicker">Engineering Workspace</div>
+              <div class="discover-summary">Presenter mode restored the main chat surface. Start with a guided workflow or ask a question about the current code.</div>
+            </div>
+          </div>
+          <div class="hero-actions">
+            <button class="hero-action" onclick="applyQuickTemplate('matlabReview')">inspect MATLAB solver</button>
+            <button class="hero-action" onclick="applyQuickTemplate('simVerify')">verify simulation</button>
+            <button class="hero-action" onclick="applyQuickTemplate('debugUi')">debug with screenshot</button>
+          </div>
+        </div>
+      `;
+    }
   }
+}
+window.ensureWelcomeSurface = ensureWelcomeSurface;
+
+function ensurePresenterSurface() {
+  const view = document.getElementById('view-chat');
+  if (view) view.style.display = 'flex';
+  const main = document.getElementById('main');
+  if (main) main.style.display = 'flex';
+  const mission = document.getElementById('mission-control');
+  if (mission) mission.style.display = 'grid';
+  const inputWrap = document.querySelector('#view-chat .input-wrap');
+  if (inputWrap) inputWrap.style.display = 'block';
+  ensureWelcomeSurface();
+  requestAnimationFrame(() => ensureWelcomeSurface());
+}
+window.ensurePresenterSurface = ensurePresenterSurface;
+
+function applyLayoutChrome() {
+  document.body.classList.toggle('presenter-mode', presenterMode);
+  document.body.classList.toggle('advanced-nav-expanded', advancedNavExpanded && !presenterMode);
+  document.body.classList.toggle('left-collapsed', !presenterMode && leftPanelCollapsed);
+  document.body.classList.toggle('right-collapsed', !presenterMode && rightPanelCollapsed);
+  const presenterBtn = document.getElementById('presenter-toggle');
+  const leftBtn = document.getElementById('left-panel-toggle');
+  const rightBtn = document.getElementById('right-panel-toggle');
+  const moreBtn = document.getElementById('nav-more');
+  if (presenterBtn) {
+    presenterBtn.classList.toggle('on', presenterMode);
+    presenterBtn.textContent = presenterMode ? 'presenter on' : 'presenter';
+  }
+  if (moreBtn) {
+    moreBtn.classList.toggle('active', advancedNavExpanded && !presenterMode);
+    moreBtn.title = advancedNavExpanded && !presenterMode ? 'Hide extra sections' : 'Show extra sections';
+  }
+  if (leftBtn) {
+    leftBtn.classList.toggle('on', !presenterMode && leftPanelCollapsed);
+    leftBtn.textContent = presenterMode ? 'files hidden' : (leftPanelCollapsed ? 'show files' : 'hide files');
+  }
+  if (rightBtn) {
+    rightBtn.classList.toggle('on', !presenterMode && rightPanelCollapsed);
+    rightBtn.textContent = presenterMode ? 'sidecar hidden' : (rightPanelCollapsed ? 'show sidecar' : 'hide sidecar');
+  }
+}
+
+function closeShellTools() {
+  const details = document.getElementById('shell-tools');
+  if (details) details.open = false;
+}
+
+function toggleAdvancedNav(force = null) {
+  advancedNavExpanded = typeof force === 'boolean' ? force : !advancedNavExpanded;
+  window.clsClawStateStore?.set('advancedNavExpanded', advancedNavExpanded);
+  localStorage.setItem('cx4_advanced_nav', advancedNavExpanded ? '1' : '0');
+  applyLayoutChrome();
+}
+
+function togglePresenterMode(force = null) {
+  presenterMode = typeof force === 'boolean' ? force : !presenterMode;
+  window.clsClawStateStore?.set('presenterMode', presenterMode);
+  localStorage.setItem('cx4_presenter_mode', presenterMode ? '1' : '0');
+  if (presenterMode) {
+    setView('chat');
+    closeShellTools();
+  }
+  applyLayoutChrome();
+  if (presenterMode) ensurePresenterSurface();
+  else renderDiscoverabilityPanels();
+}
+
+function toggleLeftPanel(force = null) {
+  leftPanelCollapsed = typeof force === 'boolean' ? force : !leftPanelCollapsed;
+  window.clsClawStateStore?.set('leftPanelCollapsed', leftPanelCollapsed);
+  localStorage.setItem('cx4_left_panel_collapsed', leftPanelCollapsed ? '1' : '0');
+  applyLayoutChrome();
+  closeShellTools();
+}
+
+function toggleRightPanel(force = null) {
+  rightPanelCollapsed = typeof force === 'boolean' ? force : !rightPanelCollapsed;
+  window.clsClawStateStore?.set('rightPanelCollapsed', rightPanelCollapsed);
+  localStorage.setItem('cx4_right_panel_collapsed', rightPanelCollapsed ? '1' : '0');
+  applyLayoutChrome();
+  closeShellTools();
 }
 
 async function loadWorkspacePulse() {
@@ -4041,7 +4338,14 @@ async function loadHomeWorkspaceSignals() {
 }
 
 function applyQuickTemplate(templateId) {
-  return window.clsClawMissionControl.applyQuickTemplate(getMissionControlCtx(), templateId);
+  const result = window.clsClawMissionControl.applyQuickTemplate(getMissionControlCtx(), templateId);
+  closeComposerAdvanced();
+  return result;
+}
+
+function closeComposerAdvanced() {
+  const details = document.getElementById('composer-advanced');
+  if (details) details.open = false;
 }
 
 function insertReferenceTemplate(referenceId) {
@@ -4054,6 +4358,7 @@ function insertReferenceTemplate(referenceId) {
   prompt.value = `${prompt.value || ''}${prefix}${template.text || ''}`;
   prompt.focus();
   autoResize(prompt);
+  closeComposerAdvanced();
 }
 
 function seedFollowupPrompt(text, modeOverride = null, profileOverride = null) {
@@ -4065,12 +4370,30 @@ function seedFollowupPrompt(text, modeOverride = null, profileOverride = null) {
   prompt.value = String(text || '').trim();
   prompt.focus();
   autoResize(prompt);
+  closeComposerAdvanced();
 }
 
 function dismissOnboarding() {
   onboardingDismissed = true;
   localStorage.setItem('cx4_onboarding_dismissed', '1');
   renderDiscoverabilityPanels();
+}
+
+function dismissSwarmPreview() {
+  currentSwarmPreview = null;
+  renderSwarmPreview();
+}
+
+function seedEngineeringDemo() {
+  togglePresenterMode(true);
+  setView('chat');
+  setChatMode('ask');
+  setExecutionProfile('parallel');
+  const prompt = document.getElementById('prompt');
+  if (!prompt) return;
+  prompt.value = 'Inspect this engineering workspace like a smart lab teammate. Identify the main MATLAB, Python, or simulation pipeline, explain what result the code is trying to produce, flag the highest-risk numerical or unit issue, and tell me the best next engineering action to improve confidence in the output.';
+  prompt.focus();
+  autoResize(prompt);
 }
 
 function setChatMode(mode, persist = true) {
@@ -4081,7 +4404,9 @@ function setChatMode(mode, persist = true) {
   document.getElementById('mode-build')?.classList.toggle('active', chatMode === 'build');
   const prompt = document.getElementById('prompt');
   if (prompt) prompt.placeholder = getPromptPlaceholder(chatMode);
+  updateComposerMiniStatus();
   renderDiscoverabilityPanels();
+  closeComposerAdvanced();
 }
 
 function setExecutionProfile(profile, persist = true) {
@@ -4099,21 +4424,115 @@ function setExecutionProfile(profile, persist = true) {
         : `No active turn · ${executionProfile} profile`,
     });
   }
+  updateComposerMiniStatus();
   renderDiscoverabilityPanels();
+  closeComposerAdvanced();
 }
 
-function inferChatMode(text) {
-  const buildPatterns = [
-    /\b(build|fix|refactor|implement|patch|rewrite|scaffold)\b/i,
-    /\b(add|create|generate)\b.+\b(feature|component|endpoint|api|page|screen|file|test|script)\b/i,
-    /\b(write|edit|modify|update)\b.+\b(code|file|function|component|class|test|script)\b/i,
-    /\b(run|execute)\b.+\b(command|commands|script|scripts|test|tests)\b/i,
-    /\bpropose fixes?\b/i,
-    /\bwith diffs?\b/i,
-    /(?:\/\/|#)\s*save_as:/i,
-    /#\s*run:/i,
-  ];
-  return buildPatterns.some((pattern) => pattern.test(text)) ? 'build' : chatMode;
+function updateComposerMiniStatus() {
+  const host = document.getElementById('composer-mini-status');
+  if (!host) return;
+  host.textContent = `${chatMode === 'build' ? 'build-first' : 'auto intent'} · ${executionProfile} profile`;
+}
+
+function inferLaneHint(text, modeHint = chatMode) {
+  const normalized = normalizeLoosePrompt(text);
+  if (/\b(hi|hello|hey|yo|how are you|what's up|whats up|good morning|good evening|thanks|thank you)\b/i.test(normalized)) {
+    return 'plain_chat';
+  }
+  if (/\b(what can we build|project ideas?|what should i ask|brainstorm)\b/i.test(normalized)) {
+    return 'brainstorm';
+  }
+  if (/\bsuggest\b/.test(normalized) && /\b(build|project|idea|something)\b/.test(normalized)) {
+    return 'brainstorm';
+  }
+  if (isOperationalPrompt(normalized)) {
+    return 'operation';
+  }
+  if (/\b(explain|analy[sz]e|architecture|flow|module|file|repo|repository|codebase|what does|how does)\b/i.test(normalized)) {
+    return 'analysis';
+  }
+  if (isQuestionLikePrompt(normalized)) {
+    return 'plain_chat';
+  }
+  if (modeHint === 'build' && normalized) {
+    return 'analysis';
+  }
+  return 'plain_chat';
+}
+
+function buildClientHints(text, modeHint = chatMode) {
+  const normalized = normalizeLoosePrompt(text);
+  const laneHint = inferLaneHint(text, modeHint);
+  return {
+    composerMode: modeHint === 'build' ? 'build' : 'ask',
+    laneHint,
+    responseStyleHint: laneHint,
+    mentionsTechnicalTargets: isOperationalPrompt(normalized) || /\b(file|repo|codebase|module|architecture|flow)\b/.test(normalized),
+  };
+}
+
+function laneChromePolicy(lane) {
+  const normalizedLane = String(lane || '').toLowerCase();
+  const operation = normalizedLane === 'operation';
+  return {
+    showMissionControl: operation,
+    showTrace: operation,
+    showTransparency: operation,
+    showCloseout: operation,
+    showSuggestedActions: operation,
+    showEvidenceDeck: operation,
+    showSources: operation,
+    showVisualEvidence: operation,
+    messageOnly: normalizedLane === 'plain_chat' || normalizedLane === 'brainstorm',
+  };
+}
+
+function laneLabel(lane) {
+  const normalizedLane = String(lane || '').toLowerCase();
+  if (normalizedLane === 'plain_chat') return 'conversation';
+  if (normalizedLane === 'brainstorm') return 'brainstorm';
+  if (normalizedLane === 'analysis') return 'analysis';
+  if (normalizedLane === 'operation') return 'operation';
+  return 'conversation';
+}
+
+function inferPromptResponseStyle(text) {
+  const lane = inferLaneHint(text, chatMode);
+  if (lane === 'plain_chat') {
+    return /\b(hi|hello|hey|yo|how are you|what's up|whats up|good morning|good evening|thanks|thank you)\b/i.test(normalizeLoosePrompt(text))
+      ? 'casual'
+      : 'plain';
+  }
+  if (lane === 'brainstorm') return 'brainstorm';
+  if (lane === 'operation') return 'coding';
+  return 'analysis';
+}
+
+function isOperationalPrompt(text) {
+  const source = String(text || '').trim().toLowerCase();
+  if (!source) return false;
+  return /\b(file|files|repo|repository|codebase|directory|folder|module|script|source|function|class|component|endpoint|api|diff|patch|refactor|implement|fix|rewrite|scaffold|edit|modify|update|run|execute|test|verify|debug)\b/.test(source);
+}
+
+function shouldUsePlainConversationLane(text, mode) {
+  return ['plain_chat', 'brainstorm', 'analysis'].includes(inferLaneHint(text, mode));
+}
+
+function normalizeLoosePrompt(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/suggets/g, 'suggest')
+    .replace(/somthing/g, 'something')
+    .replace(/[^\w\s?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isQuestionLikePrompt(text) {
+  const source = String(text || '').trim().toLowerCase();
+  return /\?$/.test(source)
+    || /^(what|why|how|who|when|where|which|can|could|would|do|does|did|is|are|am|if)\b/.test(source);
 }
 
 const BUILD_REVIEW_SECTIONS = [
@@ -4141,70 +4560,7 @@ function analyzeBuildContract(text) {
 }
 
 function buildChatSystem(mode, userText) {
-  if (mode === 'ask') {
-    return `You are clsClaw, a helpful software engineering assistant for a local project.
-Project root: ${projectRoot}
-
-The user is in Ask mode. Default to plain-text answers, analysis, explanations, and high-signal guidance.
-
-Never say you read files, repositories, or sources unless they were actually provided in context or fetched directly.
-For repository or codebase analysis, separate verified facts from inference and call out missing evidence clearly.
-Ask at most one clarifying question, and only when a missing requirement blocks a correct answer and cannot be resolved from workspace context or a reasonable default.
-Prefer inspecting relevant workspace context before making implementation claims.
-
-Do not output SAVE_AS blocks, RUN commands, shell execution requests, or file-writing instructions unless the user explicitly asks you to modify files or run commands.
-
-If code would help, include small inline examples or fenced code blocks, but keep the response conversational and focused on understanding.`;
-  }
-
-  return `You are clsClaw, a product-minded AI coding agent.
-Project root: ${projectRoot}
-
-The user is in Build mode. Implement requested changes when possible.
-
-Start with short plain-text sections in this exact order:
-Understanding:
-Plan:
-Justification:
-Risks:
-Self-check:
-Approval checkpoints:
-
-In those sections:
-- Understanding = the user's demand and desired product outcome
-- Plan = concrete implementation steps
-- Justification = why this path is the right one here
-- Risks = likely mistakes, regressions, or uncertainty
-- Self-check = how you would verify the result
-- Approval checkpoints = where the user should review before code lands or commands run
-
-Ask at most one clarifying question only if a blocker remains after using workspace context and reasonable defaults.
-Prefer inspecting relevant files before proposing changes.
-Prefer file proposals over shell commands when both could solve the task.
-
-Do not add source-code comments unless they are genuinely necessary for non-obvious logic.
-
-For files to propose: use exactly this format at the top of code blocks:
-
-These go through an approval + diff review workflow before writing to disk.
-
-For smaller surgical edits, prefer a patch block:
-*** Begin Patch
-*** Update File: relative/path/filename.ext
-@@
--old line
-+new line
-*** End Patch
-
-For commands to run: use bash blocks with:
-# RUN: command
-These require user permission before execution.
-
-If you cannot give the full decision-review contract, do not output SAVE_AS or RUN blocks yet.
-If the task is purely explanatory, answer plainly. Only emit SAVE_AS or RUN blocks when you are actually proposing a concrete change or command.
-
-User request:
-${userText}`;
+  return '';
 }
 
 function go(text, mode = null, profile = null) {
@@ -4292,22 +4648,24 @@ async function sendMsg() {
   if ((!rawText && !currentAttachments.length) || busy) return;
   document.getElementById('welcome')?.remove();
   const text = rawText || 'Analyze the attached image(s).';
-  const modeUsed = inferChatMode(rawText);
+  const clientHints = buildClientHints(rawText, chatMode);
+  const laneHint = clientHints.laneHint || 'plain_chat';
+  const chromeHint = laneChromePolicy(laneHint);
+  const requestedResponseStyle = inferPromptResponseStyle(rawText);
   const profileUsed = executionProfile;
   updateMissionControl({
     turnId: null,
+    lane: laneHint,
     summary: text.length > 96 ? `${text.slice(0, 93)}...` : text,
-    subtext: `mode=${modeUsed} · profile=${profileUsed}`,
+    subtext: chromeHint.showMissionControl ? `mode=${chatMode} · profile=${profileUsed}` : laneLabel(laneHint),
     profile: profileUsed,
     phase: 'starting',
     nextAction: 'opening stream',
+    ui: chromeHint,
     evidenceStatus: null,
     evidenceSummary: '',
     approvalRequired: false,
   });
-  if (chatMode === 'ask' && modeUsed === 'build') {
-    toast('Using build behavior for this request', 'warn');
-  }
 
   let ctxParts = [];
   const ctxStats = await api('GET', '/api/context/stats').catch(() => ({}));
@@ -4338,21 +4696,28 @@ async function sendMsg() {
   document.getElementById('send-btn').disabled = true;
   busy = true;
 
-  const system = buildChatSystem(modeUsed, text);
+  const system = buildChatSystem(chatMode, text);
 
   const wrap = document.createElement('div');
   wrap.className = 'msg msg-agent';
   wrap.appendChild(Object.assign(document.createElement('div'), { className: 'msg-lbl', textContent: 'clsClaw' }));
   document.getElementById('chat-msgs').appendChild(wrap);
 
-  const traceBox = document.createElement('div');
-  traceBox.style.display = 'none';
-  wrap.appendChild(traceBox);
-  const traceRenderer = makeToolTraceRenderer(traceBox);
+  const plainConversation = chromeHint.messageOnly || laneHint === 'analysis';
+  const traceBox = plainConversation ? null : document.createElement('div');
+  if (traceBox) {
+    traceBox.style.display = 'none';
+    wrap.appendChild(traceBox);
+  }
+  const traceRenderer = traceBox ? makeToolTraceRenderer(traceBox) : { apply() {}, finish() {} };
   const collectedSources = [];
   const collectedVisualEvidence = [];
   const collectedTransparency = {
     profile: profileUsed,
+    lane: laneHint,
+    ui: chromeHint,
+    intent: null,
+    responseStyle: plainConversation ? requestedResponseStyle : null,
     deliberation: null,
     governor: null,
     plan: null,
@@ -4370,7 +4735,7 @@ async function sendMsg() {
 
   try {
     await streamModel(
-      { apiKey: currentApiKey(), system, messages, mode: modeUsed, profile: profileUsed },
+      { apiKey: currentApiKey(), system, messages, mode: chatMode, profile: profileUsed, clientHints },
 
       (token) => {
         fullText += token;
@@ -4386,19 +4751,28 @@ async function sendMsg() {
         liveBubble.remove();
         messages.push({ role: 'assistant', content: fullText });
         updateMissionControl({
+          lane: collectedTransparency.lane || laneHint,
           phase: collectedTransparency.plan?.phase || 'complete',
           nextAction: collectedTransparency.plan?.nextAction || 'finished',
           profile: collectedTransparency.profile || profileUsed,
+          ui: collectedTransparency.ui || chromeHint,
           evidenceStatus: collectedTransparency.governor?.evidenceStatus || missionState.evidenceStatus,
           evidenceSummary: collectedTransparency.evidenceBundle?.summary || missionState.evidenceSummary,
           approvalRequired: Boolean(collectedTransparency.governor?.shouldPauseForApproval),
-          subtext: [
-            collectedTransparency.governor?.allowAutonomousContinuation === false ? 'paused' : 'completed',
-            collectedTransparency.evidenceBundle?.summary ? 'grounded' : 'lightweight',
-          ].join(' · '),
+          subtext: (collectedTransparency.lane || laneHint) !== 'operation'
+            ? laneLabel(collectedTransparency.lane || laneHint)
+            : [
+                collectedTransparency.governor?.allowAutonomousContinuation === false ? 'paused' : 'completed',
+                collectedTransparency.evidenceBundle?.summary ? 'grounded' : 'lightweight',
+              ].join(' · '),
         });
         renderAgentReply(fullText, wrap, {
-          mode: modeUsed,
+          mode: chatMode,
+          lane: collectedTransparency.lane || laneHint,
+          chrome: collectedTransparency.ui || chromeHint,
+          intent: collectedTransparency.intent,
+          responseStyle: collectedTransparency.responseStyle || requestedResponseStyle,
+          plainConversation: (collectedTransparency.lane || laneHint) !== 'operation',
           profile: profileUsed,
           sources: collectedSources,
           visualEvidence: collectedVisualEvidence,
@@ -4411,11 +4785,21 @@ async function sendMsg() {
       (evt) => {
         traceRenderer.apply(evt);
         if (evt.type === 'meta' && evt.profile) collectedTransparency.profile = evt.profile;
+        if (evt.type === 'meta' && evt.lane) collectedTransparency.lane = evt.lane;
+        if (evt.type === 'meta' && evt.ui) collectedTransparency.ui = evt.ui;
+        if (evt.type === 'meta' && evt.intent) collectedTransparency.intent = evt.intent;
+        if (evt.type === 'trace_start' && evt.lane) collectedTransparency.lane = evt.lane;
+        if (evt.type === 'trace_start' && evt.ui) collectedTransparency.ui = evt.ui;
+        if (evt.type === 'trace_start' && evt.responseStyle) collectedTransparency.responseStyle = evt.responseStyle;
         if (evt.type === 'trace_deliberation') collectedTransparency.deliberation = evt.deliberation || null;
         if (evt.type === 'trace_governor') collectedTransparency.governor = evt.governor || null;
         if (evt.type === 'trace_plan_state') collectedTransparency.plan = evt.plan || null;
         if (evt.type === 'trace_done') {
           collectedTransparency.profile = evt.profile || collectedTransparency.profile;
+          collectedTransparency.lane = evt.lane || collectedTransparency.lane;
+          collectedTransparency.intent = evt.intent || collectedTransparency.intent;
+          collectedTransparency.responseStyle = evt.responseStyle || collectedTransparency.responseStyle;
+          collectedTransparency.ui = evt.ui || collectedTransparency.ui;
           collectedTransparency.deliberation = evt.deliberation || collectedTransparency.deliberation;
           collectedTransparency.governor = evt.governor || collectedTransparency.governor;
           collectedTransparency.plan = evt.plan || collectedTransparency.plan;
@@ -4428,13 +4812,18 @@ async function sendMsg() {
           collectedVisualEvidence.push(evt.evidence);
         }
         if (evt.type === 'trace_start') {
+          collectedTransparency.intent = evt.intent || collectedTransparency.intent;
           updateMissionControl({
             turnId: evt.turnId || missionState.turnId,
+            lane: evt.lane || laneHint,
             summary: text.length > 96 ? `${text.slice(0, 93)}...` : text,
-            subtext: [evt.intent ? `intent=${evt.intent}` : '', evt.role ? `role=${evt.role}` : '', evt.mode ? `mode=${evt.mode}` : ''].filter(Boolean).join(' · ') || missionState.subtext,
+            subtext: (evt.lane || laneHint) !== 'operation'
+              ? laneLabel(evt.lane || laneHint)
+              : [evt.intent ? `intent=${evt.intent}` : '', evt.role ? `role=${evt.role}` : '', evt.mode ? `mode=${evt.mode}` : ''].filter(Boolean).join(' · ') || missionState.subtext,
             profile: evt.profile || profileUsed,
             phase: 'starting',
             nextAction: 'collect deliberation state',
+            ui: evt.ui || chromeHint,
           });
         } else if (evt.type === 'trace_deliberation') {
           updateMissionControl({
@@ -4456,9 +4845,11 @@ async function sendMsg() {
           });
         } else if (evt.type === 'trace_done') {
           updateMissionControl({
+            lane: evt.lane || collectedTransparency.lane || laneHint,
             phase: evt.plan?.phase || 'complete',
             nextAction: evt.plan?.nextAction || 'finished',
             profile: evt.profile || missionState.profile,
+            ui: evt.ui || collectedTransparency.ui || chromeHint,
             evidenceStatus: evt.governor?.evidenceStatus || missionState.evidenceStatus,
             evidenceSummary: evt.evidenceBundle?.summary || missionState.evidenceSummary,
             approvalRequired: Boolean(evt.governor?.shouldPauseForApproval),
@@ -4497,8 +4888,8 @@ async function sendMsg() {
   }
 }
 
-async function streamModel({ apiKey, system, messages, mode, profile }, onToken, onDone, onToolEvent, onError) {
-  const payload = { system, messages, mode, profile };
+async function streamModel({ apiKey, system, messages, mode, profile, clientHints }, onToken, onDone, onToolEvent, onError) {
+  const payload = { system, messages, mode, profile, clientHints };
   if (apiKey) payload.apiKey = apiKey;
 
   const response = await fetch('/api/chat/stream', {
@@ -4544,6 +4935,9 @@ function makeToolTraceRenderer(host) {
   const state = {
     turnId: null,
     status: 'idle',
+    lane: null,
+    intent: null,
+    responseStyle: null,
     steps: [],
     plan: null,
     deliberation: null,
@@ -4552,55 +4946,66 @@ function makeToolTraceRenderer(host) {
 
   function render() {
     if (!state.turnId && !state.steps.length) return;
-    host.style.display = 'flex';
-    host.className = 'tool-trace';
+    const operationalLane = state.lane === 'operation';
+    const meaningfulSteps = state.steps.some((step) => /tool|parallel|synthesis|turn error/i.test(step.title || '') || /args:|completed=|failed=|tool/i.test(step.description || ''));
+    const shouldShow = operationalLane && (state.status === 'error' || meaningfulSteps);
+    if (!shouldShow) {
+      host.style.display = 'none';
+      host.innerHTML = '';
+      return;
+    }
+    host.style.display = 'block';
     host.innerHTML = `
-      <div class="tool-trace-hdr">
-        <span>turn trace</span>
-        <span class="tool-trace-status">${esc(state.status)}</span>
-      </div>
-      ${state.plan ? `
-        <div class="tool-step ${esc(state.plan.phase || 'running')}">
-          <div class="tool-step-top">
-            <span class="tool-step-name">${esc(state.plan.summary || 'turn plan')}</span>
-            <span class="tool-step-badge">${esc(state.plan.phase || 'planning')}</span>
-          </div>
-          <div class="tool-step-desc">
-            ${esc(`next: ${state.plan.nextAction || 'decide next action'}`)}<br>
-            ${esc(`progress: ${state.plan.completedUnits || 0}/${state.plan.totalUnits || 0} · failures: ${state.plan.failures || 0} · retries: ${state.plan.retries || 0}`)}
-            ${(state.plan.confidence ?? null) !== null ? `<br>${esc(`confidence: ${Math.round((state.plan.confidence || 0) * 100)}%`)}` : ''}
-          </div>
-        </div>
-      ` : ''}
-      ${state.deliberation ? `
-        <div class="tool-step done">
-          <div class="tool-step-top">
-            <span class="tool-step-name">deliberation</span>
-            <span class="tool-step-badge">${esc(state.deliberation.initialPhase || 'planned')}</span>
-          </div>
-          <div class="tool-step-desc">${esc(`risk=${state.deliberation.risk} · ambiguity=${state.deliberation.ambiguity} · evidence=${state.deliberation.evidenceDemand} · autonomy=${state.deliberation.autonomyAllowance}`)}</div>
-        </div>
-      ` : ''}
-      ${state.governor ? `
-        <div class="tool-step done">
-          <div class="tool-step-top">
-            <span class="tool-step-name">autonomy governor</span>
-            <span class="tool-step-badge">${esc(state.governor.phaseDirective || 'continue')}</span>
-          </div>
-          <div class="tool-step-desc">${esc(`evidence=${state.governor.evidenceStatus} · continue=${state.governor.allowAutonomousContinuation ? 'yes' : 'no'} · pending=${state.governor.pendingDecisionType || 'none'}`)}${state.governor.approvalContext?.summary ? `<br>${esc(state.governor.approvalContext.summary)}` : ''}</div>
-        </div>
-      ` : ''}
-      <div class="tool-trace-body">
-        ${state.steps.map((step, index) => `
-          <div class="tool-step ${esc(step.status || 'running')}">
-            <div class="tool-step-top">
-              <span class="tool-step-name">${esc(step.title || `step ${index + 1}`)}</span>
-              <span class="tool-step-badge">${esc(step.status || 'running')}</span>
+      <details class="tool-trace" ${state.status === 'error' ? 'open' : ''}>
+        <summary class="transparency-summary">
+          <span class="transparency-title">Turn Trace</span>
+          <span class="transparency-hint">${esc(state.status)} · click to expand</span>
+        </summary>
+        <div class="transparency-body">
+          ${state.plan ? `
+            <div class="tool-step ${esc(state.plan.phase || 'running')}">
+              <div class="tool-step-top">
+                <span class="tool-step-name">${esc(state.plan.summary || 'turn plan')}</span>
+                <span class="tool-step-badge">${esc(state.plan.phase || 'planning')}</span>
+              </div>
+              <div class="tool-step-desc">
+                ${esc(`next: ${state.plan.nextAction || 'decide next action'}`)}<br>
+                ${esc(`progress: ${state.plan.completedUnits || 0}/${state.plan.totalUnits || 0} · failures: ${state.plan.failures || 0} · retries: ${state.plan.retries || 0}`)}
+                ${(state.plan.confidence ?? null) !== null ? `<br>${esc(`confidence: ${Math.round((state.plan.confidence || 0) * 100)}%`)}` : ''}
+              </div>
             </div>
-            <div class="tool-step-desc">${esc(step.description || '').replace(/\n/g, '<br>')}</div>
+          ` : ''}
+          ${state.deliberation ? `
+            <div class="tool-step done">
+              <div class="tool-step-top">
+                <span class="tool-step-name">deliberation</span>
+                <span class="tool-step-badge">${esc(state.deliberation.initialPhase || 'planned')}</span>
+              </div>
+              <div class="tool-step-desc">${esc(`risk=${state.deliberation.risk} · ambiguity=${state.deliberation.ambiguity} · evidence=${state.deliberation.evidenceDemand} · autonomy=${state.deliberation.autonomyAllowance}`)}</div>
+            </div>
+          ` : ''}
+          ${state.governor ? `
+            <div class="tool-step done">
+              <div class="tool-step-top">
+                <span class="tool-step-name">autonomy governor</span>
+                <span class="tool-step-badge">${esc(state.governor.phaseDirective || 'continue')}</span>
+              </div>
+              <div class="tool-step-desc">${esc(`evidence=${state.governor.evidenceStatus} · continue=${state.governor.allowAutonomousContinuation ? 'yes' : 'no'} · pending=${state.governor.pendingDecisionType || 'none'}`)}${state.governor.approvalContext?.summary ? `<br>${esc(state.governor.approvalContext.summary)}` : ''}</div>
+            </div>
+          ` : ''}
+          <div class="tool-trace-body">
+            ${state.steps.map((step, index) => `
+              <div class="tool-step ${esc(step.status || 'running')}">
+                <div class="tool-step-top">
+                  <span class="tool-step-name">${esc(step.title || `step ${index + 1}`)}</span>
+                  <span class="tool-step-badge">${esc(step.status || 'running')}</span>
+                </div>
+                <div class="tool-step-desc">${esc(step.description || '').replace(/\n/g, '<br>')}</div>
+              </div>
+            `).join('')}
           </div>
-        `).join('')}
-      </div>
+        </div>
+      </details>
     `;
     scrollBottom();
   }
@@ -4615,6 +5020,9 @@ function makeToolTraceRenderer(host) {
       if (!evt || !evt.type) return;
       if (evt.turnId) state.turnId = evt.turnId;
       if (evt.type === 'trace_start') {
+        state.lane = evt.lane || null;
+        state.intent = evt.intent || null;
+        state.responseStyle = evt.responseStyle || null;
         state.status = evt.toolLoop ? 'planning' : 'direct reply';
         if (evt.toolLoop) {
           pushStep('planner', `intent=${evt.intent} · role=${evt.role} · mode=${evt.mode}`, 'running');
@@ -4788,7 +5196,12 @@ async function streamExec(command, btn) {
 function renderAgentReply(text, existingWrap = null, options = {}) {
 
 
-  const mode = options.mode === 'build' ? 'build' : 'ask';
+  const effectiveIntent = String(options.intent || options.transparency?.intent || '').toLowerCase();
+  const lane = String(options.lane || options.transparency?.lane || '').toLowerCase();
+  const chrome = options.chrome || options.transparency?.ui || laneChromePolicy(lane || 'plain_chat');
+  const responseStyle = String(options.responseStyle || options.transparency?.responseStyle || '').toLowerCase();
+  const lightweightConversation = lane !== 'operation' || Boolean(options.plainConversation) || isLightweightConversationStyle(responseStyle, effectiveIntent, lane);
+  const mode = lane === 'operation' && (effectiveIntent === 'build' || (!effectiveIntent && options.mode === 'build')) ? 'build' : 'ask';
   const sources = Array.isArray(options.sources) ? dedupeSources(options.sources) : [];
   const visualEvidence = Array.isArray(options.visualEvidence) ? options.visualEvidence : [];
   const transparency = options.transparency || null;
@@ -4799,9 +5212,7 @@ function renderAgentReply(text, existingWrap = null, options = {}) {
     document.getElementById('chat-msgs').appendChild(w);
     return w;
   })();
-
   let buildArtifactsDetected = false;
-  const contract = mode === 'build' ? analyzeBuildContract(text) : null;
   const parts = text.split(/(```[\s\S]*?```)/g);
   for (const part of parts) {
     if (part.startsWith('```')) {
@@ -4821,7 +5232,7 @@ function renderAgentReply(text, existingWrap = null, options = {}) {
       const runMatch = body.match(/^\s*#\s*RUN:\s*(.+)$/m);
       if (isPatchBlock) {
         buildArtifactsDetected = true;
-        if (mode === 'build' && contract?.complete) {
+        if (lane === 'operation' && mode === 'build') {
           const patchBtn = document.createElement('button');
           patchBtn.className = 'cbtn propose';
           patchBtn.textContent = 'propose patch';
@@ -4841,18 +5252,13 @@ function renderAgentReply(text, existingWrap = null, options = {}) {
             bumpBadge('changes-badge', count);
           };
           block.querySelector('.cb-acts').prepend(patchBtn);
-        } else if (mode === 'build') {
-          const lock = document.createElement('div');
-          lock.style.cssText = 'font-size:10px;color:var(--amber);font-family:var(--mono)';
-          lock.textContent = 'decision review required before patch';
-          block.querySelector('.cb-acts').prepend(lock);
         }
       }
       if (saveMatch) {
         buildArtifactsDetected = true;
         const rel = saveMatch[1].trim();
         const fp = rel.startsWith('/') ? rel : projectRoot + '/' + rel;
-        if (mode === 'build' && contract?.complete) {
+        if (lane === 'operation' && mode === 'build') {
           const propBtn = document.createElement('button');
           propBtn.className = 'cbtn propose'; propBtn.textContent = 'propose change';
           propBtn.onclick = async () => {
@@ -4863,27 +5269,17 @@ function renderAgentReply(text, existingWrap = null, options = {}) {
             loadChanges(); bumpBadge('changes-badge', 1);
           };
           block.querySelector('.cb-acts').prepend(propBtn);
-        } else if (mode === 'build') {
-          const lock = document.createElement('div');
-          lock.style.cssText = 'font-size:10px;color:var(--amber);font-family:var(--mono)';
-          lock.textContent = 'decision review required before proposing';
-          block.querySelector('.cb-acts').prepend(lock);
         }
       }
       if ((lang === 'bash' || lang === 'sh') && runMatch) {
         buildArtifactsDetected = true;
-        if (mode === 'build' && contract?.complete) {
+        if (lane === 'operation' && mode === 'build') {
           const runBtn = document.createElement('button');
           runBtn.className = 'cbtn run'; runBtn.textContent = 'run (requires approval)';
           runBtn.onclick = () => {
             streamExec(runMatch[1].trim(), runBtn);
           };
           block.querySelector('.cb-acts').appendChild(runBtn);
-        } else if (mode === 'build') {
-          const lock = document.createElement('div');
-          lock.style.cssText = 'font-size:10px;color:var(--amber);font-family:var(--mono)';
-          lock.textContent = 'decision review required before run';
-          block.querySelector('.cb-acts').appendChild(lock);
         }
       }
       wrap.appendChild(block);
@@ -4894,47 +5290,45 @@ function renderAgentReply(text, existingWrap = null, options = {}) {
       wrap.appendChild(b);
     }
   }
-  if (mode === 'ask' && buildArtifactsDetected) {
+  if (!lightweightConversation && mode === 'ask' && buildArtifactsDetected) {
     const note = document.createElement('div');
     note.className = 'bubble';
     note.style.borderColor = 'rgba(255,198,92,.35)';
     note.innerHTML = 'Build-style output detected. Switch to <strong>build</strong> mode if you want propose-change or run actions.';
     wrap.appendChild(note);
   }
-  if (mode === 'build') {
-    const note = document.createElement('div');
-    note.className = 'bubble';
-    note.style.borderColor = contract?.complete ? 'rgba(52,211,153,.35)' : 'rgba(255,198,92,.35)';
-    note.innerHTML = contract?.complete
-      ? `Decision review complete: <strong>${esc(contract.present.join(', '))}</strong>.`
-      : `Decision review incomplete. Missing: <strong>${esc((contract?.missing || []).join(', '))}</strong>. Proposal and run actions stay locked until these sections are present.`;
-    wrap.appendChild(note);
-  }
-  if (transparency && shouldRenderTransparencyPanel(transparency)) {
+  if (chrome.showTransparency && transparency && shouldRenderTransparencyPanel(transparency, { mode, sources, visualEvidence })) {
     wrap.appendChild(makeTransparencyPanel(transparency));
   }
-  if (shouldRenderCloseoutPanel(text, transparency, { mode, sources, visualEvidence })) {
+  if (chrome.showCloseout && shouldRenderCloseoutPanel(text, transparency, { mode, sources, visualEvidence })) {
     wrap.appendChild(makeCloseoutPanel(text, transparency, { mode, sources, visualEvidence }));
   }
-  const suggestedActions = makeSuggestedActionsPanel(text, transparency, { mode, sources, visualEvidence });
+  const suggestedActions = chrome.showSuggestedActions ? makeSuggestedActionsPanel(text, transparency, { mode, sources, visualEvidence }) : null;
   if (suggestedActions) {
     wrap.appendChild(suggestedActions);
   }
-  const evidenceDeck = makeEvidenceDeckPanel(transparency?.evidenceBundle || null, { sources, visualEvidence });
+  const evidenceDeck = chrome.showEvidenceDeck ? makeEvidenceDeckPanel(transparency?.evidenceBundle || null, { sources, visualEvidence }) : null;
   if (evidenceDeck) {
     wrap.appendChild(evidenceDeck);
   }
-  const visualDebug = deriveCloseoutVisualDebug(transparency, { sources, visualEvidence });
+  const visualDebug = chrome.showVisualEvidence ? deriveCloseoutVisualDebug(transparency, { sources, visualEvidence }) : null;
   if (visualDebug) {
     wrap.appendChild(makeVisualDebugWorkflowPanel(visualDebug));
   }
-  if (sources.length) {
+  if (chrome.showSources && sources.length) {
     wrap.appendChild(makeSourcesPanel(sources));
   }
-  if (visualEvidence.length) {
+  if (chrome.showVisualEvidence && visualEvidence.length) {
     wrap.appendChild(makeVisualEvidencePanel(visualEvidence));
   }
   scrollBottom();
+}
+
+function isLightweightConversationStyle(responseStyle, intent, lane = '') {
+  if (lane && lane !== 'operation') return true;
+  const style = String(responseStyle || '').toLowerCase();
+  const normalizedIntent = String(intent || '').toLowerCase();
+  return style === 'casual' || style === 'brainstorm' || (normalizedIntent === 'chat' && !style);
 }
 
 function makeCodeBlock(lang, body) {
@@ -5102,17 +5496,39 @@ function buildEvidenceDeckCards(bundle, options = {}) {
   return entries;
 }
 
-function shouldRenderTransparencyPanel(data) {
+function hasMeaningfulGrounding(transparency, options = {}) {
+  const bundle = transparency?.evidenceBundle || null;
+  const bundleCount = Number(bundle?.total || 0);
+  const latestCount = Object.keys(bundle?.latestByCategory || {}).length;
+  const summary = String(bundle?.summary || '').trim();
+  const hasPlaceholderSummary = !summary
+    || /^no evidence yet\.?$/i.test(summary)
+    || /^no explicit grounding evidence was recorded\.?$/i.test(summary);
+  return Boolean(
+    bundleCount > 0
+    || latestCount > 0
+    || (options.sources || []).length
+    || (options.visualEvidence || []).length
+    || (summary && !hasPlaceholderSummary)
+    || transparency?.verification?.performed
+  );
+}
+
+function shouldRenderTransparencyPanel(data, options = {}) {
+  const meaningfulEvidence = hasMeaningfulGrounding(data, options);
+  if (options.mode !== 'build') {
+    return meaningfulEvidence;
+  }
   return Boolean(
     data?.deliberation ||
     data?.governor ||
     data?.plan ||
-    data?.evidenceBundle?.summary
+    meaningfulEvidence
   );
 }
 
 function makeTransparencyPanel(data) {
-  const panel = document.createElement('div');
+  const panel = document.createElement('details');
   panel.className = 'transparency-panel';
   const cards = [];
   if (data.profile || data.plan?.executionProfile || data.governor?.executionProfile || data.deliberation?.executionProfile) {
@@ -5178,29 +5594,33 @@ function makeTransparencyPanel(data) {
       value: `saved · ${data.final.artifactId}`,
     });
   }
+  const phaseSummary = data.plan?.phase || data.governor?.phaseDirective || data.deliberation?.initialPhase || 'response notes';
   panel.innerHTML = `
-    <div class="transparency-title">Why This Response Looks This Way</div>
-    <div class="transparency-grid">
-      ${cards.map((card) => `
-        <div class="transparency-card">
-          <div class="transparency-label">${esc(card.label)}</div>
-          <div class="transparency-value">${esc(card.value)}</div>
-        </div>
-      `).join('')}
+    <summary class="transparency-summary">
+      <span class="transparency-title">Response Notes</span>
+      <span class="transparency-hint">${esc(phaseSummary)} · click to expand</span>
+    </summary>
+    <div class="transparency-body">
+      <div class="transparency-grid">
+        ${cards.map((card) => `
+          <div class="transparency-card">
+            <div class="transparency-label">${esc(card.label)}</div>
+            <div class="transparency-value">${esc(card.value)}</div>
+          </div>
+        `).join('')}
+      </div>
     </div>
   `;
   return panel;
 }
 
 function shouldRenderCloseoutPanel(text, transparency, options = {}) {
-  if (options.mode === 'build') return true;
-  return Boolean(
-    transparency?.plan ||
-    transparency?.governor ||
-    transparency?.deliberation ||
-    (options.sources || []).length ||
-    (options.visualEvidence || []).length
-  );
+  const hasConcreteOutput = /```patch/i.test(String(text || '')) || /SAVE_AS:/i.test(String(text || '')) || /^\s*#\s*RUN:/m.test(String(text || ''));
+  const meaningfulGrounding = hasMeaningfulGrounding(transparency, options);
+  if (options.mode === 'build') {
+    return Boolean(hasConcreteOutput || meaningfulGrounding || (transparency?.governor?.phaseDirective === 'await_approval' && transparency?.governor?.evidenceStatus !== 'none'));
+  }
+  return meaningfulGrounding;
 }
 
 function makeCloseoutPanel(text, transparency, options = {}) {
@@ -5236,15 +5656,19 @@ function makeCloseoutPanel(text, transparency, options = {}) {
 
 function buildSuggestedActionItems(text, transparency, options = {}) {
   const actions = [];
+  const meaningfulGrounding = hasMeaningfulGrounding(transparency, options);
   const artifactId = transparency?.final?.artifactId || null;
   const approvalBlocked = transparency?.governor?.phaseDirective === 'await_approval' || Boolean(transparency?.governor?.shouldPauseForApproval);
+  const hasConcreteOutput = /```patch/i.test(String(text || '')) || /SAVE_AS:/i.test(String(text || '')) || /^\s*#\s*RUN:/m.test(String(text || ''));
   if (approvalBlocked || options.mode === 'build') {
-    actions.push({
-      label: 'review queue',
-      action: "setView('changes')",
-    });
+    if (hasConcreteOutput || transparency?.governor?.evidenceStatus !== 'none') {
+      actions.push({
+        label: 'review queue',
+        action: "setView('changes')",
+      });
+    }
   }
-  if (transparency?.deliberation?.needsVerification || options.mode === 'build') {
+  if (transparency?.deliberation?.needsVerification && (hasConcreteOutput || meaningfulGrounding)) {
     actions.push({
       label: 'verify latest work',
       action: "seedFollowupPrompt('/verify Verify the latest changes, summarize what is confirmed, and call out anything still unverified.', 'ask', 'deliberate')",
@@ -6214,6 +6638,15 @@ async function refreshHealthPill() {
 
 function openModal(id) { return window.clsClawDomUtils.openModal(id); }
 function closeModal(id) { return window.clsClawDomUtils.closeModal(id); }
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  const modals = [...document.querySelectorAll('.modal-ov')].filter((el) => el.style.display !== 'none');
+  const topmost = modals[modals.length - 1];
+  if (!topmost) return;
+  if (topmost.id === 'modal-auth' && !authState.authenticated) return;
+  closeModal(topmost.id);
+});
 function isHiddenAlliedShortcut(event) {
   const isMacPlatform = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '');
   const key = String(event.key || '').toLowerCase();

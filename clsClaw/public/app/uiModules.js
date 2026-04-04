@@ -63,6 +63,49 @@
     },
   };
 
+  const engineeringTemplates = {
+    matlabReview: {
+      label: 'MATLAB review',
+      title: 'Inspect a MATLAB solver',
+      detail: 'Map the script flow, numerical assumptions, and the most likely instability or unit mistakes.',
+      mode: 'ask',
+      profile: 'deliberate',
+      text: 'Inspect this MATLAB project like an engineering reviewer. Explain the solver flow, key inputs/outputs, numerical assumptions, likely instability or unit risks, and the highest-value next fix.',
+    },
+    simVerify: {
+      label: 'Simulation verify',
+      title: 'Verify simulation outputs',
+      detail: 'Check logs, data files, and code paths before trusting a plot, table, or result.',
+      mode: 'ask',
+      profile: 'parallel',
+      text: 'Verify this engineering simulation result. Inspect the relevant code, logs, and output files, summarize what is confirmed, what is suspicious, and what should be checked next before trusting the result.',
+    },
+    translateModel: {
+      label: 'MATLAB -> Python',
+      title: 'Translate technical code',
+      detail: 'Convert MATLAB to Python or another stack without losing formulas, units, or vectorization intent.',
+      mode: 'build',
+      profile: 'execute',
+      text: 'Translate the relevant MATLAB function or script into clean Python/NumPy, preserve the numerical logic, call out any unit or indexing differences, and propose a verification strategy against the original output.',
+    },
+    labDebug: {
+      label: 'Debug plot or UI',
+      title: 'Use screenshots and code together',
+      detail: 'Great for broken plots, dashboards, GUIs, and engineering front ends with visual symptoms.',
+      mode: 'build',
+      profile: 'parallel',
+      text: '/debug-ui Use the attached screenshot plus the relevant engineering code and outputs to diagnose the visible issue, explain the root cause, propose the smallest safe fix, and verify it.',
+    },
+    reportBrief: {
+      label: 'Research brief',
+      title: 'Summarize project state',
+      detail: 'Turn code, outputs, and notes into a compact briefing for teammates, lab reports, or supervisors.',
+      mode: 'ask',
+      profile: 'quick',
+      text: 'Give me a concise engineering project briefing: what this codebase does, the current state of the work, the biggest risk to result quality, and the next best action for a student engineering team.',
+    },
+  };
+
   const referenceTemplates = {
     file: {
       label: '@file',
@@ -167,9 +210,9 @@
   } = {}) {
     const stats = [
       {
-        label: 'Mode',
+        label: 'Mode hint',
         value: chatMode,
-        detail: chatMode === 'build' ? 'Editing, patching, and verification-first execution.' : 'Analysis, inspection, and grounded answers.',
+        detail: chatMode === 'build' ? 'A build-leaning composer hint. The backend still decides the real lane per turn.' : 'An ask-leaning composer hint. The backend still decides the real lane per turn.',
       },
       {
         label: 'Profile',
@@ -213,17 +256,17 @@
     }
     const heroActions = [
       { label: 'Review workspace', template: 'review' },
-      { label: 'Fix bug safely', template: 'fix' },
-      { label: 'Verify recent work', template: 'verify' },
-      { label: 'Debug a screenshot', template: 'debugUi' },
+      { label: 'Inspect MATLAB solver', template: 'matlabReview' },
+      { label: 'Verify simulation', template: 'simVerify' },
+      { label: 'Translate technical code', template: 'translateModel' },
     ];
     return `
       <div class="hero-shell">
         <div class="hero-banner">
           <div class="hero-copy">
             <div class="hero-kicker">Local-first engineering cockpit</div>
-            <div class="hero-title">Inspect, act, review, and verify from one workspace.</div>
-            <div class="hero-text">${esc(missionState.summary || 'Evidence-backed work starts here. Use a quick action or describe the next task in plain language.')}</div>
+            <div class="hero-title">Inspect, simulate, review, and verify from one workspace.</div>
+            <div class="hero-text">${esc(missionState.summary || 'Built for engineering codebases where MATLAB, Python, simulation outputs, plots, and technical reasoning all have to line up before you trust the result.')}</div>
             <div class="hero-actions">
               ${heroActions.map((item) => `<button class="hero-action" onclick="applyQuickTemplate('${item.template}')">${esc(item.label)}</button>`).join('')}
             </div>
@@ -297,13 +340,19 @@
         detail: missionState.turnId ? `tracking turn ${String(missionState.turnId).slice(0, 8)}` : 'No active turn yet.',
       },
     ];
+    const compactCards = cards.filter((card) => {
+      if (phase === 'idle' && !missionState.turnId) {
+        return card.label === 'Execution' || card.label === 'Evidence' || card.label === 'Privacy';
+      }
+      return true;
+    });
     return `
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px">
-        ${cards.map((card) => `
-          <div style="border:1px solid var(--border);border-radius:14px;padding:12px 14px;background:linear-gradient(180deg,rgba(15,23,42,0.65),rgba(15,23,42,0.28))">
-            <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--hint)">${esc(card.label)}</div>
-            <div style="margin-top:6px;font-size:13px;font-weight:700;color:var(--text)">${esc(card.value)}</div>
-            <div style="margin-top:6px;font-size:11px;line-height:1.6;color:var(--muted)">${esc(card.detail).slice(0, 140)}</div>
+      <div class="mission-mini-grid">
+        ${compactCards.map((card) => `
+          <div class="mission-mini-card">
+            <div class="mission-mini-label">${esc(card.label)}</div>
+            <div class="mission-mini-value">${esc(card.value)}</div>
+            <div class="mission-mini-detail">${esc(card.detail).slice(0, 120)}</div>
           </div>
         `).join('')}
       </div>
@@ -387,27 +436,15 @@
   }
 
   function renderWelcomePanel() {
-    const items = Object.entries(workflowTemplates).map(([id, item]) => `
-      <button class="discover-card" onclick="applyQuickTemplate('${id}')">
-        <div class="discover-top">
-          <span class="discover-label">${esc(item.label)}</span>
-          <span class="discover-profile">${esc(item.profile)}</span>
-        </div>
-        <div class="discover-title">${esc(item.title)}</div>
-        <div class="discover-detail">${esc(item.detail)}</div>
-      </button>
-    `).join('');
-    return `
-      <div class="discover-panel">
-        <div class="discover-heading">
-          <div>
-            <div class="discover-kicker">Operator Flows</div>
-            <div class="discover-summary">Use a guided workflow when you already know the shape of the task.</div>
-          </div>
-        </div>
-        <div class="discover-grid">${items}</div>
-      </div>
-    `;
+    return '';
+  }
+
+  function renderEngineeringShowcase({ presenterMode = false } = {}) {
+    return '';
+  }
+
+  function resolveTemplate(templateId) {
+    return workflowTemplates[templateId] || engineeringTemplates[templateId] || null;
   }
 
   function formatArtifactValue(value) {
@@ -417,7 +454,10 @@
   }
 
   function renderComposerGuide({ mode = 'ask', profile = 'deliberate' } = {}) {
-    const workflowChips = Object.entries(workflowTemplates).map(([id, item]) => {
+    const visibleWorkflowIds = ['review', 'fix', 'verify', 'brief'];
+    const workflowChips = visibleWorkflowIds.map((id) => {
+      const item = workflowTemplates[id];
+      if (!item) return '';
       const active = item.mode === mode || item.profile === profile;
       return `<button class="composer-chip ${active ? 'active' : ''}" onclick="applyQuickTemplate('${id}')">${esc(item.label)}</button>`;
     }).join('');
@@ -427,14 +467,14 @@
     return `
       <div class="composer-guide">
         <div class="composer-row">
-          <span class="composer-label">flows</span>
+          <span class="composer-label">quick actions</span>
           <div class="composer-chips">${workflowChips}</div>
         </div>
         <div class="composer-row">
-          <span class="composer-label">references</span>
+          <span class="composer-label">insert refs</span>
           <div class="composer-chips">${referenceChips}</div>
         </div>
-        <div class="composer-caption">Current mode: ${esc(mode)} · profile: ${esc(profile)} · click a flow to seed the prompt with inspect-first guidance.</div>
+        <div class="composer-caption">Usually you can just type the request. Open this drawer only when you want to force a workflow or insert a reference token.</div>
       </div>
     `;
   }
@@ -492,6 +532,8 @@
 
   window.clsClawModules = {
     workflowTemplates,
+    engineeringTemplates,
+    resolveTemplate,
     referenceTemplates,
     renderHomeShell,
     renderOnboardingPanel,
@@ -500,6 +542,7 @@
     renderArtifactMetadataRows,
     renderArtifactParsedContent,
     renderWelcomePanel,
+    renderEngineeringShowcase,
     renderComposerGuide,
     renderWorkspacePulse,
   };

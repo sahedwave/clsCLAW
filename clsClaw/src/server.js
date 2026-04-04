@@ -553,6 +553,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
     } = body;
     if (root) {
       if (!fs.existsSync(root)) return json(res, 400, { error: 'Path does not exist' });
+      if (!fs.statSync(root).isDirectory()) return json(res, 400, { error: 'Project root must be a folder, not a single file' });
       projectRoot = root;
     }
     const resolvedInput = {};
@@ -1483,7 +1484,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
 
   
   if (is('/api/chat', 'POST') || is('/api/claude', 'POST')) {
-    const { apiKey, messages, system, mode, profile } = body;
+    const { apiKey, messages, system, mode, profile, clientHints } = body;
     const requestCtl = createRequestController(req, 60000);
     try {
       const hydratedMessages = hydrateMessages(messages || []);
@@ -1496,6 +1497,8 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
           role: canonical.role,
           intent: canonical.intent,
           mode: canonical.mode,
+          lane: canonical.lane || 'plain_chat',
+          ui: canonical.ui || null,
           profile: 'deliberate',
           content: [{ type: 'text', text: canonical.text }],
         });
@@ -1506,10 +1509,11 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
         messages: hydratedMessages,
         mode,
         profile,
+        clientHints,
         incomingSystem: [
           system || '',
           getWorkspaceIdentityPrompt(),
-          await getAutoContextPrompt({ policy: buildPolicySystem({ projectRoot, messages: hydratedMessages, mode, profile }), messages: hydratedMessages, providers: resolvedProviders }),
+          await getAutoContextPrompt({ policy: buildPolicySystem({ projectRoot, messages: hydratedMessages, mode, profile, clientHints }), messages: hydratedMessages, providers: resolvedProviders }),
         ].filter(Boolean).join('\n\n'),
       });
       const reply = await turnOrchestrator.runTurn({
@@ -1524,8 +1528,10 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
         provider: reply.provider,
         model: reply.model,
         role: policy.role,
+        lane: policy.lane,
         intent: policy.intent,
         mode: policy.mode,
+        ui: policy.ui || null,
         profile: policy.profile,
         turnId: reply.turnId,
         trace: reply.trace,
@@ -1543,17 +1549,18 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
 
   
   if (is('/api/chat/stream', 'POST') || is('/api/claude/stream', 'POST')) {
-    const { apiKey, messages, system, mode, profile } = body;
+    const { apiKey, messages, system, mode, profile, clientHints } = body;
     const requestCtl = createRequestController(req, 120000);
     const hydratedMessages = hydrateMessages(messages || []);
     const canonical = maybeAnswerCanonicalQuestion({ messages: hydratedMessages });
     const resolvedProviders = resolveModelProviders(apiKey);
-    const basePolicy = buildPolicySystem({ projectRoot, messages: hydratedMessages, mode, profile });
+    const basePolicy = buildPolicySystem({ projectRoot, messages: hydratedMessages, mode, profile, clientHints });
     const policy = buildPolicySystem({
       projectRoot,
       messages: hydratedMessages,
       mode,
       profile,
+      clientHints,
       incomingSystem: [
         system || '',
         getWorkspaceIdentityPrompt(),
@@ -1581,6 +1588,8 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
         role: canonical.role,
         intent: canonical.intent,
         mode: canonical.mode,
+        lane: canonical.lane || 'plain_chat',
+        ui: canonical.ui || null,
         profile: 'deliberate',
       });
       sendEvent({ type: 'token', text: canonical.text });
@@ -1591,6 +1600,15 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
     }
 
     try {
+      sendEvent({
+        type: 'meta',
+        role: policy.role,
+        lane: policy.lane,
+        intent: policy.intent,
+        mode: policy.mode,
+        ui: policy.ui || null,
+        profile: policy.profile,
+      });
       const reply = await turnOrchestrator.runTurn({
         providers: resolvedProviders,
         policy,
@@ -1608,8 +1626,10 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
         provider: reply.provider,
         model: reply.model,
         role: policy.role,
+        lane: policy.lane,
         intent: policy.intent,
         mode: policy.mode,
+        ui: policy.ui || null,
         profile: policy.profile,
         turnId: reply.turnId,
         deliberation: reply.trace?.deliberation || null,

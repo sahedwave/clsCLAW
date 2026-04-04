@@ -1,6 +1,7 @@
 'use strict';
 
 const { EventEmitter } = require('events');
+const { composeFinalAnswer } = require('../llm/finalAnswerComposer');
 const { classifyDeliberation } = require('./deliberationPolicy');
 const { summarizeEvidenceBundle } = require('./evidenceBundle');
 const { evaluateAutonomy } = require('./autonomyGovernor');
@@ -48,28 +49,51 @@ class TurnOrchestrator extends EventEmitter {
       if (typeof onEvent === 'function') onEvent(event);
     };
 
+    const lane = String(policy?.lane || inferLaneFromIntent(policy?.intent)).toLowerCase();
+    if (lane !== 'operation') {
+      return runLightweightTurn.call(this, {
+        providers,
+        policy: {
+          ...policy,
+          lane,
+        },
+        messages,
+        actor,
+        timeoutMs,
+        onToken,
+        signal,
+        emit,
+      });
+    }
+
     const executionProfile = normalizeExecutionProfile(policy.executionProfile || policy.profile);
     const deliberation = classifyDeliberation({ policy, messages });
     const toolLoop = shouldUseToolLoop(policy, messages, deliberation);
     const turn = this._traceStore.createTurn({
       mode: policy.mode,
       profile: executionProfile.id,
+      lane,
       intent: policy.intent,
+      responseStyle: policy.responseStyle,
       role: policy.role,
       userText: policy.userText,
       toolLoop,
       summary: buildTurnSummary(policy),
       deliberation,
+      ui: policy.ui,
       actor,
     });
     this._traceStore.updateDeliberation(turn.id, deliberation);
     emit('trace_start', {
       turnId: turn.id,
       toolLoop,
+      lane,
       intent: policy.intent,
+      responseStyle: policy.responseStyle || null,
       role: policy.role,
       mode: policy.mode,
       profile: executionProfile.id,
+      ui: policy.ui || null,
     });
     emit('trace_deliberation', {
       turnId: turn.id,
@@ -152,7 +176,11 @@ class TurnOrchestrator extends EventEmitter {
           onToken,
           signal,
         });
-        finalAnswer = direct.text || '';
+        finalAnswer = composeFinalAnswer({
+          text: direct.text || '',
+          policy,
+          usedTools: false,
+        });
         finalProvider = direct.provider;
         finalModel = direct.model;
         updatePlanState({
@@ -200,6 +228,44 @@ class TurnOrchestrator extends EventEmitter {
             nextAction: `decide step ${nextStepNumber}`,
             completedUnits: Math.max(0, nextStepNumber - 1),
           });
+
+          const directInspection = inferDirectWorkspaceInspection({
+            policy,
+            trace: this._traceStore.getTurn(turn.id),
+            stepIndex,
+          });
+          if (directInspection) {
+            governor = syncGovernor(directInspection);
+            updatePlanState({
+              lastDecision: { type: 'tool', tool: directInspection.tool },
+              confidence: directInspection.confidence ?? 0.82,
+              nextAction: describeDecision(directInspection),
+              approvalRequired: governor.shouldPauseForApproval,
+            });
+            emit('tool_plan', {
+              turnId: turn.id,
+              step: nextStepNumber,
+              plan: directInspection,
+            });
+            usedTools = true;
+            nextStepNumber = await runToolStep({
+              turnId: turn.id,
+              toolName: directInspection.tool,
+              args: directInspection.args,
+              reason: directInspection.reason,
+              stepNumber: nextStepNumber,
+              deadline,
+              signal,
+              traceStore: this._traceStore,
+              toolRuntime: this._toolRuntime,
+              providers,
+              messages,
+              emit,
+              updatePlanState,
+              totalUnits: maxSteps,
+            });
+            continue;
+          }
 
           const plannerResponse = await this._modelRouter.call({
             role: 'analyze',
@@ -279,7 +345,11 @@ class TurnOrchestrator extends EventEmitter {
               });
               break;
             }
-            finalAnswer = String(decision.answer || '').trim();
+            finalAnswer = composeFinalAnswer({
+              text: String(decision.answer || '').trim(),
+              policy,
+              usedTools,
+            });
             finalProvider = plannerResponse.provider;
             finalModel = plannerResponse.model;
             updatePlanState({
@@ -386,7 +456,11 @@ class TurnOrchestrator extends EventEmitter {
             onToken,
             signal,
           });
-          finalAnswer = synth.text || '';
+          finalAnswer = composeFinalAnswer({
+            text: synth.text || '',
+            policy,
+            usedTools,
+          });
           finalProvider = synth.provider;
           finalModel = synth.model;
         }
@@ -415,9 +489,13 @@ class TurnOrchestrator extends EventEmitter {
       });
       emit('trace_done', {
         turnId: turn.id,
+        lane,
         provider: finalProvider,
         model: finalModel,
         profile: executionProfile.id,
+        intent: policy.intent,
+        responseStyle: policy.responseStyle || null,
+        ui: policy.ui || null,
         usedTools,
         deliberation: this._traceStore.getTurn(turn.id)?.deliberation || null,
         governor: this._traceStore.getTurn(turn.id)?.governor || null,
@@ -431,6 +509,7 @@ class TurnOrchestrator extends EventEmitter {
         provider: finalProvider,
         model: finalModel,
         usedTools,
+        lane,
         trace: this._traceStore.getTurn(turn.id),
       };
     } catch (err) {
@@ -452,16 +531,239 @@ class TurnOrchestrator extends EventEmitter {
   }
 }
 
+async function runLightweightTurn({
+  providers,
+  policy,
+  messages = [],
+  actor = null,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  onToken = null,
+  signal = null,
+  emit,
+} = {}) {
+  const executionProfile = normalizeExecutionProfile(policy.executionProfile || policy.profile);
+  const lane = String(policy?.lane || inferLaneFromIntent(policy?.intent)).toLowerCase();
+  const allowLightInspection = Boolean(policy?.tools?.allowLightInspection);
+  const turn = this._traceStore.createTurn({
+    mode: policy.mode,
+    profile: executionProfile.id,
+    lane,
+    intent: policy.intent,
+    responseStyle: policy.responseStyle,
+    role: policy.role,
+    userText: policy.userText,
+    toolLoop: false,
+    summary: buildTurnSummary(policy),
+    ui: policy.ui,
+    actor,
+  });
+
+  emit('trace_start', {
+    turnId: turn.id,
+    toolLoop: false,
+    lane,
+    intent: policy.intent,
+    responseStyle: policy.responseStyle || null,
+    role: policy.role,
+    mode: policy.mode,
+    profile: executionProfile.id,
+    ui: policy.ui || null,
+  });
+
+  const updatePlanState = (patch = {}) => {
+    const plan = this._traceStore.updatePlan(turn.id, patch);
+    emit('trace_plan_state', {
+      turnId: turn.id,
+      plan,
+    });
+    return plan;
+  };
+
+  updatePlanState({
+    phase: allowLightInspection ? 'inspect' : 'responding',
+    nextAction: allowLightInspection ? 'decide whether one lightweight inspection is needed' : 'compose direct answer',
+    totalUnits: allowLightInspection ? 2 : 1,
+    completedUnits: 0,
+    executionProfile: executionProfile.id,
+  });
+
+  let usedTools = false;
+  let finalProvider = null;
+  let finalModel = null;
+  let finalAnswer = '';
+
+  try {
+    const inspectionDecision = inferLightweightInspection({
+      policy,
+      messages,
+      trace: this._traceStore.getTurn(turn.id),
+    });
+
+    if (inspectionDecision) {
+      usedTools = true;
+      updatePlanState({
+        phase: 'inspect',
+        nextAction: inspectionDecision.reason,
+      });
+      emit('tool_plan', {
+        turnId: turn.id,
+        step: 1,
+        plan: inspectionDecision,
+      });
+      await runToolStep({
+        turnId: turn.id,
+        toolName: inspectionDecision.tool,
+        args: inspectionDecision.args,
+        reason: inspectionDecision.reason,
+        stepNumber: 1,
+        deadline: Date.now() + timeoutMs,
+        signal,
+        traceStore: this._traceStore,
+        toolRuntime: this._toolRuntime,
+        providers,
+        messages,
+        emit,
+        updatePlanState,
+        totalUnits: 2,
+        phase: 'inspect',
+      });
+    }
+
+    const modelResponse = await this._modelRouter.call({
+      role: policy.role,
+      system: usedTools ? buildLightweightSynthesisSystem(policy) : policy.system,
+      prompt: usedTools
+        ? buildSynthesisPrompt({ messages, trace: this._traceStore.getTurn(turn.id) })
+        : flattenMessages(messages),
+      apiKey: providers,
+      stream: Boolean(onToken),
+      onToken,
+      signal,
+    });
+
+    finalAnswer = composeFinalAnswer({
+      text: modelResponse.text || '',
+      policy,
+      usedTools,
+    });
+    finalProvider = modelResponse.provider;
+    finalModel = modelResponse.model;
+
+    updatePlanState({
+      phase: 'responding',
+      completedUnits: usedTools ? 2 : 1,
+      nextAction: 'final answer ready',
+      confidence: usedTools ? 0.86 : 0.92,
+    });
+
+    const artifactRecord = createTurnArtifact({
+      artifactStore: this._artifactStore,
+      turn: this._traceStore.getTurn(turn.id),
+      policy,
+      finalAnswer,
+      usedTools,
+    });
+    if (artifactRecord) {
+      this._traceStore.attachArtifact(turn.id, artifactRecord);
+    }
+
+    this._traceStore.finalizeTurn(turn.id, {
+      status: 'done',
+      final: {
+        provider: finalProvider,
+        model: finalModel,
+        usedTools,
+        answerPreview: String(finalAnswer || '').slice(0, 200),
+        artifactId: artifactRecord?.id || null,
+      },
+    });
+    emit('trace_done', {
+      turnId: turn.id,
+      lane,
+      provider: finalProvider,
+      model: finalModel,
+      profile: executionProfile.id,
+      intent: policy.intent,
+      responseStyle: policy.responseStyle || null,
+      ui: policy.ui || null,
+      usedTools,
+      deliberation: null,
+      governor: null,
+      plan: this._traceStore.getTurn(turn.id)?.plan || null,
+      evidenceBundle: this._traceStore.getTurn(turn.id)?.evidenceBundle || null,
+    });
+
+    return {
+      turnId: turn.id,
+      text: finalAnswer,
+      provider: finalProvider,
+      model: finalModel,
+      usedTools,
+      lane,
+      trace: this._traceStore.getTurn(turn.id),
+    };
+  } catch (err) {
+    const status = signal?.aborted ? 'cancelled' : 'error';
+    this._traceStore.finalizeTurn(turn.id, {
+      status,
+      error: err.message,
+      final: {
+        usedTools,
+      },
+    });
+    emit('trace_error', {
+      turnId: turn.id,
+      error: err.message,
+      cancelled: Boolean(signal?.aborted),
+    });
+    throw err;
+  }
+}
+
 function shouldUseToolLoop(policy, messages = []) {
   const deliberation = arguments[2] || null;
+  if (String(policy?.lane || inferLaneFromIntent(policy?.intent)).toLowerCase() !== 'operation') {
+    return false;
+  }
   const text = String(policy?.userText || '').toLowerCase();
+  const responseStyle = String(policy?.responseStyle || '');
   if (deliberation?.inspectFirst) return true;
+  if (responseStyle === 'casual' || responseStyle === 'brainstorm') return false;
   if (deliberation?.needsVerification && ['build', 'review', 'test'].includes(policy?.intent)) return true;
-  if (['repo_analysis', 'review', 'build', 'test', 'docs', 'plan'].includes(policy?.intent)) return true;
+  if (['repo_analysis', 'review', 'build', 'test', 'docs'].includes(policy?.intent)) return true;
   if (hasImageInputs(messages)) return true;
   if (/\b(latest|current|today|verify|check online|search|browse|docs)\b/.test(text)) return true;
   if (/\b(file|files|repo|repository|codebase|directory|project structure)\b/.test(text)) return true;
   return false;
+}
+
+function inferLightweightInspection({ policy, messages = [], trace = null } = {}) {
+  if (!policy?.tools?.allowLightInspection && !policy?.tools?.allowTools) return null;
+  if ((trace?.evidence || []).length) return null;
+  if (hasImageInputs(messages)) {
+    return {
+      type: 'inspect',
+      tool: 'vision_inspect',
+      args: { prompt: policy.userText || 'Inspect the attached image and extract relevant details.' },
+      reason: 'inspect attached visual evidence before answering',
+      confidence: 0.8,
+    };
+  }
+  const directFileRead = inferDirectWorkspaceInspection({ policy, trace, stepIndex: 0 });
+  if (directFileRead) return directFileRead;
+  if (String(policy?.lane || '') === 'analysis' && /\b(file|files|repo|repository|codebase|module|architecture|flow|component|function|class|hook|source|code)\b/i.test(String(policy?.userText || ''))) {
+    return {
+      type: 'inspect',
+      tool: 'workspace_query_context',
+      args: {
+        query: String(policy.userText || '').slice(0, 300),
+        maxFiles: 4,
+      },
+      reason: 'gather a small amount of relevant workspace context before answering',
+      confidence: 0.72,
+    };
+  }
+  return null;
 }
 
 function buildToolPlannerSystem({ policy, deliberation, tools, maxSteps, executionProfile = null, hasImages = false }) {
@@ -652,7 +954,19 @@ function createTurnArtifact({ artifactStore, turn, policy, finalAnswer, usedTool
 function parsePlannerDecision(text) {
   const parsed = extractJsonObject(text);
   if (!parsed || typeof parsed !== 'object') {
-    throw new Error('Planner did not return valid JSON');
+    const fallback = String(text || '').trim();
+    if (fallback) {
+      return {
+        type: 'final',
+        answer: stripMarkdownFences(fallback),
+        confidence: 0.42,
+      };
+    }
+    return {
+      type: 'final',
+      answer: 'I could not get a structured planning response from the model. Please retry after checking the configured model provider, and make sure the workspace root is the containing folder for the file you want analyzed.',
+      confidence: 0.12,
+    };
   }
   if (parsed.type === 'final') {
     return {
@@ -716,6 +1030,13 @@ function parsePlannerDecision(text) {
   throw new Error('Planner JSON must use type="inspect", "verify", "ask", "await_approval", "tool", "batch", or "final"');
 }
 
+function stripMarkdownFences(text) {
+  return String(text || '')
+    .replace(/^```[a-z0-9_-]*\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+}
+
 function extractJsonObject(text) {
   const source = String(text || '').trim();
   const fenced = source.match(/```json\s*([\s\S]*?)```/i);
@@ -732,6 +1053,61 @@ function extractJsonObject(text) {
     } catch {}
   }
   return null;
+}
+
+function inferDirectWorkspaceInspection({ policy, trace, stepIndex = 0 } = {}) {
+  if (stepIndex !== 0) return null;
+  if (!policy?.userText) return null;
+  if ((trace?.evidence || []).length) return null;
+  const lane = String(policy?.lane || inferLaneFromIntent(policy?.intent)).toLowerCase();
+  if (!['analysis', 'operation'].includes(lane)) return null;
+  if (!policy?.tools?.allowLightInspection && lane !== 'operation') return null;
+  if (!shouldInspectReferencedPath(policy.userText, policy)) return null;
+  const matchedPath = extractLikelyWorkspacePath(policy.userText);
+  if (!matchedPath) return null;
+  return {
+    type: 'tool',
+    tool: 'workspace_read_file',
+    args: { path: matchedPath },
+    reason: `read the specifically referenced file first: ${matchedPath}`,
+    confidence: 0.86,
+  };
+}
+
+function extractLikelyWorkspacePath(text) {
+  const source = String(text || '');
+  const match = source.match(/(?:^|[\s"'`])([A-Za-z0-9_./-]+\.[A-Za-z0-9_+-]{1,12})(?=$|[\s"'`:,;])/);
+  if (!match) return '';
+  const candidate = String(match[1] || '').trim();
+  if (!candidate) return '';
+  if (/^https?:\/\//i.test(candidate)) return '';
+  if (candidate.startsWith('..')) return '';
+  if (/\/\.\./.test(candidate)) return '';
+  if (!/^[A-Za-z0-9_./-]+\.[A-Za-z0-9_+-]{1,12}$/.test(candidate)) return '';
+  if (candidate.startsWith('/')) return candidate.slice(1);
+  return candidate.replace(/^\.\/+/, '');
+}
+
+function shouldInspectReferencedPath(text, policy = {}) {
+  const source = String(text || '').toLowerCase();
+  if (String(policy?.lane || '').toLowerCase() === 'plain_chat' || String(policy?.lane || '').toLowerCase() === 'brainstorm') return false;
+  if (policy?.intent === 'build' || policy?.intent === 'review') return true;
+  return /\b(analy[sz]e|inspect|read|open|review|check|debug|fix|explain)\b/.test(source)
+    || /\b(file|files|module|script|code|source)\b/.test(source);
+}
+
+function buildLightweightSynthesisSystem(policy) {
+  return [
+    policy.system,
+    'You may have a small amount of directly gathered evidence for this non-operational turn.',
+    'Use it only to support a clean answer-first reply.',
+    'Do not switch into patch, run, approval, or closeout mode.',
+  ].join('\n\n');
+}
+
+function inferLaneFromIntent(intent = '') {
+  if (['review', 'build', 'test', 'docs'].includes(String(intent || '').toLowerCase())) return 'operation';
+  return 'analysis';
 }
 
 function flattenMessages(messages = []) {
@@ -1021,5 +1397,6 @@ module.exports = {
   TurnOrchestrator,
   shouldUseToolLoop,
   parsePlannerDecision,
+  inferDirectWorkspaceInspection,
   extractJsonObject,
 };

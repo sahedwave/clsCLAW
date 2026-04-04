@@ -1,7 +1,12 @@
 'use strict';
 
 const { normalizeExecutionProfile } = require('../orchestration/executionProfiles');
-const { extractWorkflowDirective, stripWorkflowDirective } = require('../orchestration/deliberationPolicy');
+const {
+  normalizeMode,
+  extractUserIntentText,
+  hasAttachedContext,
+  routeConversation,
+} = require('./conversationRouter');
 
 const CANONICAL_FACTS = {
   productName: 'clsClaw',
@@ -18,69 +23,8 @@ const BUILD_REVIEW_SECTIONS = [
   'Approval checkpoints',
 ];
 
-function normalizeMode(mode) {
-  return mode === 'build' ? 'build' : 'ask';
-}
-
-function extractUserIntentText(messages = []) {
-  const lastUser = [...messages].reverse().find((msg) => msg?.role === 'user');
-  if (!lastUser) return '';
-  const content = Array.isArray(lastUser.content)
-    ? lastUser.content.map((part) => part?.text || '').join('\n')
-    : String(lastUser.content || '');
-  return stripWorkflowDirective(content.split('\n\nCONTEXT:\n')[0].trim());
-}
-
-function hasAttachedContext(messages = []) {
-  const lastUser = [...messages].reverse().find((msg) => msg?.role === 'user');
-  if (!lastUser) return false;
-  const content = Array.isArray(lastUser.content)
-    ? lastUser.content.map((part) => part?.text || '').join('\n')
-    : String(lastUser.content || '');
-  return content.includes('\n\nCONTEXT:\n');
-}
-
-function detectIntent({ messages = [], mode = 'ask' } = {}) {
-  const normalizedMode = normalizeMode(mode);
-  const lastUser = [...messages].reverse().find((msg) => msg?.role === 'user');
-  const rawContent = lastUser
-    ? Array.isArray(lastUser.content)
-      ? lastUser.content.map((part) => part?.text || '').join('\n')
-      : String(lastUser.content || '')
-    : '';
-  const userText = extractUserIntentText(messages);
-  const text = userText.toLowerCase();
-  const directive = extractWorkflowDirective(rawContent || userText);
-
-  if (directive === 'review') return 'review';
-  if (directive === 'fix' || directive === 'build') return 'build';
-  if (directive === 'verify' || directive === 'test') return 'test';
-  if (directive === 'debug-ui') return 'build';
-  if (directive === 'brief') return 'plan';
-  if (directive === 'swarm') return 'plan';
-
-  if (/\b(repository|repo|codebase|github|compare repos|compare repositories|surgical analysis|deep dive)\b/.test(text)) {
-    return 'repo_analysis';
-  }
-  if (/\b(review|audit|critique|inspect this pr|code review|request changes)\b/.test(text)) {
-    return 'review';
-  }
-  if (/\b(plan|roadmap|break this into steps|phases|milestones)\b/.test(text)) {
-    return 'plan';
-  }
-  if (/\b(write tests|add tests|test coverage|unit tests|integration tests|e2e)\b/.test(text)) {
-    return 'test';
-  }
-  if (/\b(readme|documentation|docs|docstrings|jsdoc)\b/.test(text)) {
-    return 'docs';
-  }
-  if (normalizedMode === 'build') {
-    return 'build';
-  }
-  if (/\b(build|fix|refactor|implement|patch|rewrite|scaffold)\b/.test(text)) {
-    return 'build';
-  }
-  return 'chat';
+function detectIntent({ messages = [], mode = 'ask', clientHints = {} } = {}) {
+  return routeConversation({ messages, mode, clientHints }).intent;
 }
 
 function intentToRole(intent) {
@@ -89,13 +33,8 @@ function intentToRole(intent) {
       return 'review';
     case 'test':
       return 'test';
-    case 'docs':
-      return 'docs';
     case 'build':
       return 'code';
-    case 'repo_analysis':
-    case 'plan':
-    case 'chat':
     default:
       return 'analyze';
   }
@@ -117,6 +56,8 @@ function maybeAnswerCanonicalQuestion({ messages = [] } = {}) {
       mode: 'ask',
       intent: 'identity',
       role: 'analyze',
+      lane: 'plain_chat',
+      ui: buildUiPolicy('plain_chat'),
     };
   }
 
@@ -130,120 +71,34 @@ function maybeAnswerCanonicalQuestion({ messages = [] } = {}) {
       mode: 'ask',
       intent: 'identity',
       role: 'analyze',
+      lane: 'plain_chat',
+      ui: buildUiPolicy('plain_chat'),
     };
   }
 
   return null;
 }
 
-function buildPolicySystem({ projectRoot = '', messages = [], mode = 'ask', profile = 'deliberate', incomingSystem = '' } = {}) {
-  const normalizedMode = normalizeMode(mode);
-  const executionProfile = normalizeExecutionProfile(profile);
-  const intent = detectIntent({ messages, mode: normalizedMode });
-  const role = intentToRole(intent);
-  const userText = extractUserIntentText(messages);
-
-  const shared = `You are clsClaw, a high-agency software engineering assistant for a local workspace.
-Project root: ${projectRoot}
-
-Canonical product facts:
-- Product name: ${CANONICAL_FACTS.productName}
-- Assistant name: ${CANONICAL_FACTS.assistantName}
-- Creator of ${CANONICAL_FACTS.productName}: ${CANONICAL_FACTS.creatorName}
-
-Always understand the user's actual demand before answering.
-Prefer direct, calm, high-signal replies.
-State assumptions briefly when you make them.
-If you are uncertain, say exactly what is uncertain instead of bluffing.
-Never claim you read files, repos, pages, or sources unless they were actually provided in context or fetched directly.
-If screenshots or images are attached, treat them as first-class evidence and describe only what they visibly support.
-Do not add source-code comments unless they are genuinely necessary for non-obvious logic.`;
-
-  const askPolicy = `Mode: Ask
-Intent: ${intent}
-
-Reply in plain text by default.
-Do not emit SAVE_AS blocks, RUN commands, shell instructions, or file-writing proposals unless the user explicitly asks for implementation.
-If the request is a review, findings come first, ordered by severity, with concise reasoning.
-If the request is planning, give a practical plan with tradeoffs and likely risks.
-Ask at most one clarifying question, and only when a missing requirement blocks a correct answer and cannot be resolved from workspace context or a reasonable default.
-Focus on helping the user understand what to do next.`;
-
-  const reviewPolicy = `Review rules:
-- Start with Findings.
-- Order findings by severity.
-- For each finding, say what is wrong, why it matters, and where it appears when the context shows that.
-- After Findings, use these sections when helpful: Open Questions, Residual Risk, Change Summary.
-- If you do not find a real issue, say "No findings" and then note any residual testing gaps or uncertainty.
-- Do not turn a review into a rewrite unless the user explicitly asks for fixes.`;
-
-  const repoAnalysisPolicy = `Repository analysis rules:
-- Separate the answer into: Verified, Inferred, Missing Evidence, Recommendation.
-- Verified means facts directly grounded in files, code, or fetched source material you actually saw.
-- Inferred means your reasoned guess from those facts.
-- Missing Evidence means exactly what you would need to verify next.
-- Never present inference as fact.
-- When comparing products, call out what makes ${CANONICAL_FACTS.productName} uniquely better when supported by evidence: evidence-first analysis, approval-gated changes, local-first control, ask/build mode separation, and self-check before build output.`;
-
-  const repoInspectionPolicy = `Repo-grounding rules:
-- Prefer grounding your answer in workspace files and retrieved context before making claims about implementation details.
-- If workspace context is thin or missing, say exactly what you still need to inspect instead of bluffing.
-- Use reasonable defaults when possible, but name them briefly.
-- Treat commands, edits, and file proposals as deliberate actions, not as your default answer.
-- Prefer inspection before action, and review before execution.`;
-
-  const buildPolicy = `Mode: Build
-Intent: ${intent}
-
-When implementing, your reply must start with these plain-text sections in this exact order before any code blocks:
-Understanding:
-Plan:
-Justification:
-Risks:
-Self-check:
-Approval checkpoints:
-
-Requirements for those sections:
-- Understanding: restate the user demand and the target product outcome.
-- Plan: list the concrete implementation steps you intend to take.
-- Justification: explain why this approach is better than obvious alternatives for this workspace.
-- Risks: name likely failure modes, weak assumptions, or places you could still be wrong.
-- Self-check: describe how you would validate the result and what still needs verification.
-- Approval checkpoints: name the moments where the user should review or approve before code lands or commands run.
-
-In Self-check and Risks, actively try to surface mistakes before they become file changes.
-Prefer clean, product-quality output over the fastest patch.
-Prefer modifying existing files over creating new structure unless a new file is justified.
-Ask at most one clarifying question only if a blocker remains after using workspace context and reasonable defaults.
-Prefer inspecting relevant files before proposing changes.
-Prefer file proposals over shell commands when both could solve the task.
-
-Only after those sections, emit SAVE_AS file proposals and RUN blocks when they are truly needed.
-For surgical edits, prefer a patch block over a full-file rewrite when that keeps the change clearer and smaller.
-Patch block format:
-*** Begin Patch
-*** Update File: relative/path/to/file.ext
-@@
--old line
-+new line
-*** End Patch
-If you cannot confidently produce the full review contract, do not emit SAVE_AS or RUN blocks yet.
-Do not emit SAVE_AS or RUN blocks for purely explanatory answers.`;
-
+function buildPolicySystem({
+  projectRoot = '',
+  messages = [],
+  mode = 'ask',
+  profile = 'deliberate',
+  incomingSystem = '',
+  clientHints = {},
+} = {}) {
+  const route = routeConversation({
+    projectRoot,
+    messages,
+    mode,
+    profile,
+    clientHints,
+  });
+  const executionProfile = normalizeExecutionProfile(profile || route.profile);
   const promptParts = [
-    shared,
-    normalizedMode === 'build' ? buildPolicy : askPolicy,
+    buildSharedSystem({ projectRoot }),
+    buildLaneSystem(route),
   ];
-
-  if (intent === 'repo_analysis') {
-    promptParts.push(repoAnalysisPolicy);
-  }
-  if (intent === 'review') {
-    promptParts.push(reviewPolicy);
-  }
-  if (['repo_analysis', 'review', 'build', 'test', 'docs', 'plan'].includes(intent)) {
-    promptParts.push(repoInspectionPolicy);
-  }
 
   if (incomingSystem && String(incomingSystem).trim()) {
     promptParts.push(`Caller guidance:\n${String(incomingSystem).trim()}`);
@@ -255,19 +110,109 @@ Do not emit SAVE_AS or RUN blocks for purely explanatory answers.`;
 - Max steps budget: ${executionProfile.maxSteps}
 - Safe parallel reads preferred: ${executionProfile.allowParallel ? 'yes' : 'no'}`);
 
-  if (userText) {
-    promptParts.push(`Current user request:\n${userText}`);
+  if (route.userText) {
+    promptParts.push(`Current user request:\n${route.userText}`);
   }
 
   return {
-    mode: normalizedMode,
+    mode: normalizeMode(mode),
     profile: executionProfile.id,
     executionProfile,
-    intent,
-    role,
-    userText,
+    lane: route.lane,
+    intent: route.intent,
+    responseStyle: route.responseStyle,
+    role: route.role || intentToRole(route.intent),
+    userText: route.userText,
+    tools: { ...route.tools },
+    ui: { ...route.ui },
+    workflowDirective: route.workflowDirective,
+    hasImages: route.hasImages,
+    hasAttachedContext: route.hasAttachedContext,
     system: promptParts.join('\n\n'),
   };
+}
+
+function buildSharedSystem({ projectRoot = '' } = {}) {
+  return `You are clsClaw, a natural assistant first and a coding agent only when the task truly requires it.
+Project root: ${projectRoot}
+
+Canonical product facts:
+- Product name: ${CANONICAL_FACTS.productName}
+- Assistant name: ${CANONICAL_FACTS.assistantName}
+- Creator of ${CANONICAL_FACTS.productName}: ${CANONICAL_FACTS.creatorName}
+
+Always understand the user's real request before answering.
+Start in the lightest possible response lane and escalate only when the task clearly requires repo work.
+Never claim you read files, repositories, pages, or sources unless they were actually provided in context or fetched directly.
+If screenshots or images are attached, treat them as first-class evidence and describe only what they visibly support.
+If you are uncertain, say exactly what is uncertain instead of bluffing.
+Do not add source-code comments unless they are genuinely necessary for non-obvious logic.`;
+}
+
+function buildLaneSystem(route = {}) {
+  const lane = route.lane || 'analysis';
+  if (lane === 'plain_chat') {
+    return `Resolved lane: plain_chat
+Intent: ${route.intent}
+Style: ${route.responseStyle}
+
+Reply like a polished everyday assistant.
+Answer directly in plain language.
+No orchestration talk.
+No trace, closeout, evidence deck, approvals, patch output, RUN blocks, SAVE_AS blocks, or file-writing proposals.
+Keep greetings and casual conversation short and natural.
+For factual or personal questions, give the answer plainly and stop unless the user asks for more.`;
+  }
+
+  if (lane === 'brainstorm') {
+    return `Resolved lane: brainstorm
+Intent: ${route.intent}
+Style: ${route.responseStyle}
+
+Lead with ideas, options, or lightweight plans.
+Do not ask a blocking follow-up before offering concrete suggestions.
+No tool loop.
+No operational UI language.
+No patch output, RUN blocks, SAVE_AS blocks, or approval framing.
+Keep the answer creative, direct, and easy to scan.`;
+  }
+
+  if (lane === 'analysis') {
+    return `Resolved lane: analysis
+Intent: ${route.intent}
+Style: ${route.responseStyle}
+
+Answer first.
+Explain architecture, behavior, or tradeoffs clearly and without orchestration language.
+Inspect lightly only when truly needed to answer correctly.
+Do not turn analysis into implementation.
+Do not emit patch output, RUN blocks, SAVE_AS blocks, approval pauses, or closeout summaries.
+Separate verified facts from inference when evidence matters.`;
+  }
+
+  const reviewBlock = route.intent === 'review'
+    ? `Review rules:
+- Start with Findings.
+- Order findings by severity.
+- Explain what is wrong, why it matters, and where it appears.
+- If there is no real issue, say "No findings" and note any residual risk or missing tests.`
+    : '';
+
+  return `Resolved lane: operation
+Intent: ${route.intent}
+Style: ${route.responseStyle}
+
+Behave like a practical coding agent.
+Inspect first, then make the smallest safe change or verification step that solves the task.
+Preserve real engineering power for fix, refactor, review, verify, and debug work.
+Use tools when they materially improve correctness.
+Verification, approval, and closeout are allowed only because this is an operational turn.
+Keep the user-facing answer natural and compact instead of sounding like an orchestration console.
+${reviewBlock}`.trim();
+}
+
+function buildUiPolicy(lane) {
+  return routeConversation({ messages: [], mode: 'ask', clientHints: { composerMode: lane === 'operation' ? 'build' : 'ask' } }).ui;
 }
 
 module.exports = {

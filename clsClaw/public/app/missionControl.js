@@ -2,12 +2,16 @@
   const VIEWS = ['chat', 'changes', 'perms', 'agents', 'worktrees', 'skills', 'apps', 'auto', 'github', 'ctx', 'plan', 'memory', 'identity', 'security'];
 
   function renderMissionControl(ctx) {
+    const host = document.getElementById('mission-control');
     const summaryEl = document.getElementById('mission-summary');
     const subEl = document.getElementById('mission-sub');
     const chipsEl = document.getElementById('mission-chips');
     const detailEl = document.getElementById('mission-detail');
-    if (!summaryEl || !subEl || !chipsEl) return;
+    if (!host || !summaryEl || !subEl || !chipsEl) return;
     const missionState = ctx.getMissionState();
+    const showMissionControl = missionState?.lane === 'operation' && missionState?.ui?.showMissionControl !== false;
+    host.style.display = showMissionControl ? 'grid' : 'none';
+    if (!showMissionControl) return;
     const profile = missionState.profile || ctx.getExecutionProfile() || 'deliberate';
     const phase = missionState.phase || 'idle';
     summaryEl.textContent = missionState.summary || 'Idle. Start a task to see live orchestration state.';
@@ -37,6 +41,7 @@
     const missionState = ctx.getMissionState();
     updateMissionControl(ctx, {
       turnId: turn.id || null,
+      lane: turn.meta?.lane || missionState.lane || null,
       summary: turn.meta?.userText || turn.plan?.summary || 'Recent turn',
       subtext: [
         turn.meta?.intent ? `intent=${turn.meta.intent}` : '',
@@ -46,6 +51,7 @@
       profile: turn.meta?.profile || turn.plan?.executionProfile || missionState.profile,
       phase: turn.plan?.phase || turn.status || 'idle',
       nextAction: turn.plan?.nextAction || 'wait',
+      ui: turn.meta?.ui || missionState.ui || null,
       evidenceStatus: turn.governor?.evidenceStatus || null,
       evidenceSummary: turn.evidenceBundle?.summary || '',
       approvalRequired: Boolean(turn.governor?.shouldPauseForApproval || turn.plan?.approvalRequired),
@@ -61,11 +67,13 @@
     }
     updateMissionControl(ctx, {
       turnId: null,
+      lane: null,
       summary: 'Idle. Start a task to see live orchestration state.',
       subtext: `No active turn · ${ctx.getExecutionProfile()} profile`,
       profile: ctx.getExecutionProfile(),
       phase: 'idle',
       nextAction: 'wait',
+      ui: null,
       evidenceStatus: null,
       evidenceSummary: '',
       approvalRequired: false,
@@ -95,6 +103,9 @@
     if (viewEl) viewEl.style.display = 'flex';
     const navEl = document.getElementById(`nav-${v}`);
     if (navEl) navEl.classList.add('active');
+    if (v === 'chat' && typeof window.ensureWelcomeSurface === 'function') {
+      window.ensureWelcomeSurface();
+    }
     if (v === 'worktrees') ctx.loadWorktrees();
     if (v === 'agents') ctx.loadAgents();
     if (v === 'apps') ctx.loadConnectors();
@@ -142,7 +153,9 @@
   }
 
   function applyQuickTemplate(ctx, templateId) {
-    const template = window.clsClawModules?.workflowTemplates?.[templateId];
+    const template = window.clsClawModules?.resolveTemplate
+      ? window.clsClawModules.resolveTemplate(templateId)
+      : window.clsClawModules?.workflowTemplates?.[templateId];
     if (!template) return;
     ctx.setView('chat');
     ctx.setChatMode(template.mode || ctx.getChatMode());
