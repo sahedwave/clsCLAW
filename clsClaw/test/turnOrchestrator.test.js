@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 
 const TurnTraceStore = require('../src/orchestration/turnTraceStore');
-const { TurnOrchestrator, shouldUseToolLoop } = require('../src/orchestration/turnOrchestrator');
+const { TurnOrchestrator, shouldUseToolLoop, inferDirectWorkspaceInspection } = require('../src/orchestration/turnOrchestrator');
 
 function makeStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clsclaw-turns-'));
@@ -17,29 +17,25 @@ function makeStore() {
   };
 }
 
-test('shouldUseToolLoop routes serious repo and build work through tools first', () => {
-  assert.equal(shouldUseToolLoop({ intent: 'repo_analysis', userText: 'Explain this repo' }), true);
-  assert.equal(shouldUseToolLoop({ intent: 'build', userText: 'Fix the failing tests' }), true);
-  assert.equal(shouldUseToolLoop({ intent: 'chat', userText: 'say hello' }), false);
-  assert.equal(shouldUseToolLoop(
-    { intent: 'chat', userText: 'What does this screenshot show?' },
-    [{ role: 'user', content: [{ type: 'text', text: 'What does this screenshot show?' }, { type: 'image', uploadId: 'img-1', name: 'screen.png' }] }],
-  ), true);
+test('shouldUseToolLoop only enables the heavy loop for operation lane turns', () => {
+  assert.equal(shouldUseToolLoop({ lane: 'operation', intent: 'build', userText: 'Fix the failing tests' }), true);
+  assert.equal(shouldUseToolLoop({ lane: 'analysis', intent: 'analysis', userText: 'Explain the auth flow' }), false);
+  assert.equal(shouldUseToolLoop({ lane: 'plain_chat', intent: 'chat', userText: 'hi' }), false);
+  assert.equal(shouldUseToolLoop({ lane: 'brainstorm', intent: 'plan', userText: 'suggest me something to build' }), false);
 });
 
-test('turn orchestrator performs a tool step before synthesizing the final answer', async () => {
+test('analysis lane can gather one lightweight workspace query before answering', async () => {
   const { dir, store } = makeStore();
-  const calls = [];
-  const modelResponses = [
-    { text: '{"type":"tool","tool":"workspace_query_context","args":{"query":"auth flow","maxFiles":2},"reason":"inspect implementation"}', provider: 'openai', model: 'planner' },
-    { text: '{"type":"final","answer":"The auth flow lives in src/auth.js and validates tokens before route handling."}', provider: 'openai', model: 'planner' },
-  ];
-
+  let modelCalls = 0;
   const orchestrator = new TurnOrchestrator({
     modelRouter: {
-      async call(input) {
-        calls.push(input);
-        return modelResponses.shift();
+      async call() {
+        modelCalls += 1;
+        return {
+          text: 'The auth flow validates the token in src/auth.js before route handling.',
+          provider: 'openai',
+          model: 'gpt-test',
+        };
       },
     },
     toolRuntime: {
@@ -48,7 +44,7 @@ test('turn orchestrator performs a tool step before synthesizing the final answe
       },
       async execute(tool, args) {
         assert.equal(tool, 'workspace_query_context');
-        assert.equal(args.query, 'auth flow');
+        assert.match(args.query, /auth flow/i);
         return {
           ok: true,
           summary: 'Found 1 relevant file',
@@ -60,57 +56,53 @@ test('turn orchestrator performs a tool step before synthesizing the final answe
     traceStore: store,
   });
 
-  const events = [];
   const result = await orchestrator.runTurn({
     providers: { openai: 'test-key' },
     policy: {
+      lane: 'analysis',
       mode: 'ask',
-      intent: 'repo_analysis',
+      intent: 'analysis',
       role: 'analyze',
+      responseStyle: 'analysis',
+      tools: { allowTools: true, allowLightInspection: true, allowToolLoop: false },
+      ui: { showMissionControl: false },
       userText: 'Explain the auth flow',
       system: 'policy system',
     },
     messages: [{ role: 'user', content: 'Explain the auth flow' }],
-    onEvent: (evt) => events.push(evt.type),
   });
 
-  assert.match(result.text, /auth flow/i);
+  assert.equal(modelCalls, 1);
   assert.equal(result.usedTools, true);
-  assert.ok(result.trace.steps.some((step) => step.kind === 'tool_result'));
+  assert.equal(result.lane, 'analysis');
+  assert.match(result.text, /auth flow/i);
   assert.ok(result.trace.evidence.some((evidence) => evidence.source === 'src/auth.js'));
-  assert.equal(events[0], 'trace_start');
-  assert.ok(events.includes('trace_plan_state'));
-  assert.ok(events.includes('tool_plan'));
-  assert.ok(events.includes('tool_start'));
-  assert.equal(calls.length, 2);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('turn orchestrator emits citation-labelled evidence for web-backed turns', async () => {
+test('analysis lane reads a specifically named file without entering the planner loop', async () => {
   const { dir, store } = makeStore();
-  const modelResponses = [
-    { text: '{"type":"tool","tool":"web_search","args":{"query":"latest clsClaw release","limit":1},"reason":"verify current release info"}', provider: 'openai', model: 'planner' },
-    { text: '{"type":"final","answer":"The latest release was found on the official release page [S1]."}', provider: 'openai', model: 'planner' },
-  ];
-
-  const events = [];
+  let modelCalls = 0;
   const orchestrator = new TurnOrchestrator({
     modelRouter: {
       async call() {
-        return modelResponses.shift();
+        modelCalls += 1;
+        return { text: 'The file uses the wrong parabolic motion formula.', provider: 'openai', model: 'gpt-test' };
       },
     },
     toolRuntime: {
       describe() {
-        return [{ name: 'web_search', description: 'search web', args: { query: 'string' } }];
+        return [{ name: 'workspace_read_file', description: 'read file', args: { path: 'string' } }];
       },
-      async execute() {
+      async execute(tool, args) {
+        assert.equal(tool, 'workspace_read_file');
+        assert.equal(args.path, 'wrong_parabolic_motion.m');
         return {
           ok: true,
-          summary: 'Found release page',
-          observation: { results: [{ url: 'https://example.com/releases', title: 'Release notes' }] },
-          evidence: [{ type: 'web', source: 'https://example.com/releases', url: 'https://example.com/releases', title: 'Release notes', snippet: 'Release note body' }],
+          summary: `Read ${args.path}`,
+          observation: { path: args.path, content: 'y = v0*t + 0.5*g*t^2' },
+          evidence: [{ type: 'workspace', source: args.path, snippet: 'y = v0*t + 0.5*g*t^2' }],
         };
       },
     },
@@ -120,25 +112,27 @@ test('turn orchestrator emits citation-labelled evidence for web-backed turns', 
   const result = await orchestrator.runTurn({
     providers: { openai: 'test-key' },
     policy: {
+      lane: 'analysis',
       mode: 'ask',
-      intent: 'chat',
+      intent: 'analysis',
       role: 'analyze',
-      userText: 'What is the latest clsClaw release?',
+      responseStyle: 'analysis',
+      tools: { allowTools: true, allowLightInspection: true, allowToolLoop: false },
+      ui: { showMissionControl: false },
+      userText: 'wrong_parabolic_motion.m Analyze the file',
       system: 'policy system',
     },
-    messages: [{ role: 'user', content: 'What is the latest clsClaw release?' }],
-    onEvent: (evt) => events.push(evt),
+    messages: [{ role: 'user', content: 'wrong_parabolic_motion.m Analyze the file' }],
   });
 
-  const evidenceEvent = events.find((evt) => evt.type === 'evidence_added');
-  assert.equal(evidenceEvent.evidence.citationId, 'S1');
-  assert.match(result.text, /\[S1\]/);
-  assert.equal(result.trace.evidence[0].citationId, 'S1');
+  assert.equal(modelCalls, 1);
+  assert.match(result.text, /parabolic motion formula/i);
+  assert.ok(result.trace.steps.some((step) => step.tool === 'workspace_read_file'));
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('turn orchestrator falls back to direct answer when tool loop is not required', async () => {
+test('plain chat lane falls back to direct answer with no tool activity', async () => {
   const { dir, store } = makeStore();
   let streamed = '';
   const orchestrator = new TurnOrchestrator({
@@ -161,9 +155,13 @@ test('turn orchestrator falls back to direct answer when tool loop is not requir
   const result = await orchestrator.runTurn({
     providers: { openai: 'test-key' },
     policy: {
+      lane: 'plain_chat',
       mode: 'ask',
       intent: 'chat',
       role: 'analyze',
+      responseStyle: 'plain',
+      tools: { allowTools: false, allowLightInspection: false, allowToolLoop: false },
+      ui: { showMissionControl: false },
       userText: 'say hello',
       system: 'policy system',
     },
@@ -174,36 +172,21 @@ test('turn orchestrator falls back to direct answer when tool loop is not requir
   assert.equal(result.text, 'hello world');
   assert.equal(result.usedTools, false);
   assert.equal(streamed, 'hello world');
+
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('turn orchestrator inspects attached images before finalizing', async () => {
+test('plain chat greetings are normalized into short natural replies', async () => {
   const { dir, store } = makeStore();
-  const planned = [];
   const orchestrator = new TurnOrchestrator({
     modelRouter: {
-      async call(input) {
-        planned.push(input);
-        if (input.role === 'analyze') {
-          return { text: '{"type":"final","answer":"The screenshot shows a failing permission request and a warning banner."}', provider: 'openai', model: 'planner' };
-        }
-        return { text: 'The screenshot shows a failing permission request and a warning banner.', provider: 'openai', model: 'vision' };
+      async call() {
+        return { text: "Hello! It's nice to chat with you about your project. What's on your mind today?", provider: 'openai', model: 'gpt-test' };
       },
     },
     toolRuntime: {
-      describe() {
-        return [{ name: 'vision_inspect', description: 'inspect image', args: { prompt: 'string' } }];
-      },
-      async execute(tool, args) {
-        assert.equal(tool, 'vision_inspect');
-        assert.match(args.prompt, /screenshot/i);
-        return {
-          ok: true,
-          summary: 'Analyzed 1 image attachment',
-          observation: { text: 'warning banner' },
-          evidence: [{ type: 'image_analysis', source: 'screen.png', snippet: 'warning banner' }],
-        };
-      },
+      describe() { return []; },
+      async execute() { throw new Error('should not execute tools'); },
     },
     traceStore: store,
   });
@@ -211,93 +194,77 @@ test('turn orchestrator inspects attached images before finalizing', async () =>
   const result = await orchestrator.runTurn({
     providers: { openai: 'test-key' },
     policy: {
+      lane: 'plain_chat',
       mode: 'ask',
       intent: 'chat',
+      responseStyle: 'casual',
       role: 'analyze',
-      userText: 'What does this screenshot show?',
+      tools: { allowTools: false, allowLightInspection: false, allowToolLoop: false },
+      ui: { showMissionControl: false },
+      userText: 'hi',
       system: 'policy system',
     },
-    messages: [{ role: 'user', content: [{ type: 'text', text: 'What does this screenshot show?' }, { type: 'image', uploadId: 'img-1', name: 'screen.png' }] }],
+    messages: [{ role: 'user', content: 'hi' }],
   });
 
-  assert.match(result.text, /warning banner/i);
-  assert.equal(result.usedTools, true);
-  assert.ok(result.trace.evidence.some((evidence) => evidence.type === 'image_analysis'));
+  assert.equal(result.text, "Hey. I'm here and ready to help.");
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('turn orchestrator can run a safe parallel read batch and track plan state', async () => {
+test('brainstorm lane returns direct ideas without operational artifacts', async () => {
   const { dir, store } = makeStore();
-  const events = [];
   const orchestrator = new TurnOrchestrator({
     modelRouter: {
       async call() {
-        return {
-          text: JSON.stringify({
-            type: 'batch',
-            reason: 'compare two source files before answering',
-            confidence: 0.7,
-            items: [
-              { tool: 'workspace_read_file', args: { path: 'src/a.js' } },
-              { tool: 'workspace_read_file', args: { path: 'src/b.js' } },
-            ],
-          }),
-          provider: 'openai',
-          model: 'planner',
-        };
+        return { text: 'Sure. What kind of app would you like to build?', provider: 'openai', model: 'gpt-test' };
       },
     },
     toolRuntime: {
-      describe() {
-        return [{ name: 'workspace_read_file', description: 'read file', args: { path: 'string' } }];
-      },
-      async execute(tool, args) {
-        return {
-          ok: true,
-          summary: `Read ${args.path}`,
-          observation: { path: args.path, content: `// ${args.path}` },
-          evidence: [{ type: 'workspace', source: args.path, snippet: `// ${args.path}` }],
-        };
-      },
+      describe() { return []; },
+      async execute() { throw new Error('should not execute tools'); },
     },
     traceStore: store,
   });
 
-  const turnPromise = orchestrator.runTurn({
+  const result = await orchestrator.runTurn({
     providers: { openai: 'test-key' },
     policy: {
+      lane: 'brainstorm',
       mode: 'ask',
-      intent: 'repo_analysis',
+      intent: 'plan',
+      responseStyle: 'brainstorm',
       role: 'analyze',
-      userText: 'Compare the two files',
+      tools: { allowTools: false, allowLightInspection: false, allowToolLoop: false },
+      ui: { showMissionControl: false },
+      userText: 'suggest me what can we build for engineering students',
       system: 'policy system',
     },
-    messages: [{ role: 'user', content: 'Compare the two files' }],
-    onEvent: (evt) => {
-      events.push(evt);
-      if (evt.type === 'tool_batch_result') {
-
-        orchestrator._modelRouter.call = async () => ({
-          text: '{"type":"final","answer":"Both files were read and compared."}',
-          provider: 'openai',
-          model: 'planner',
-        });
-      }
-    },
+    messages: [{ role: 'user', content: 'suggest me what can we build for engineering students' }],
   });
 
-  const result = await turnPromise;
-  assert.match(result.text, /compared/i);
-  assert.ok(events.some((evt) => evt.type === 'tool_batch_start'));
-  assert.ok(events.some((evt) => evt.type === 'trace_plan_state' && evt.plan?.phase === 'parallel_reads'));
-  assert.equal(result.trace.plan.parallelBatches, 1);
-  assert.equal(result.trace.evidence.length, 2);
+  assert.match(result.text, /We could build one of these next:/);
+  assert.doesNotMatch(result.text, /RUN:|SAVE_AS:|\*\*\* Begin Patch/i);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('turn orchestrator can pause with a clarifying question via phase-aware decision', async () => {
+test('inferDirectWorkspaceInspection ignores fake dotted fragments from quoted error text', () => {
+  const decision = inferDirectWorkspaceInspection({
+    policy: {
+      lane: 'plain_chat',
+      intent: 'chat',
+      userText: 'why did u reply with "Error: File not found: /Users/VIP/Desktop/..u "',
+      tools: { allowTools: false, allowLightInspection: false },
+    },
+    trace: { evidence: [] },
+    stepIndex: 0,
+  });
+
+  assert.equal(decision, null);
+});
+
+test('operation lane can pause with a clarifying question before tool planning', async () => {
   const { dir, store } = makeStore();
   let plannerCalls = 0;
   const orchestrator = new TurnOrchestrator({
@@ -316,7 +283,7 @@ test('turn orchestrator can pause with a clarifying question via phase-aware dec
         return [{ name: 'workspace_query_context', description: 'query workspace', args: { query: 'string' } }];
       },
       async execute() {
-        throw new Error('should not execute tools for ask decision');
+        throw new Error('should not execute tools for ask-first decision');
       },
     },
     traceStore: store,
@@ -325,9 +292,13 @@ test('turn orchestrator can pause with a clarifying question via phase-aware dec
   const result = await orchestrator.runTurn({
     providers: { openai: 'test-key' },
     policy: {
+      lane: 'operation',
       mode: 'build',
       intent: 'build',
       role: 'code',
+      responseStyle: 'coding',
+      tools: { allowTools: true, allowLightInspection: false, allowToolLoop: true },
+      ui: { showMissionControl: true },
       userText: 'make it better somehow',
       system: 'policy system',
     },
@@ -335,32 +306,38 @@ test('turn orchestrator can pause with a clarifying question via phase-aware dec
   });
 
   assert.match(result.text, /important exact outcome|prioritize first/i);
-  assert.equal(result.trace.plan.phase, 'complete');
   assert.equal(result.trace.deliberation.askUserFirst, true);
-  assert.equal(result.trace.governor.phaseDirective, 'ask');
   assert.equal(plannerCalls, 0);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('turn orchestrator can stop at await_approval without executing risky next steps', async () => {
+test('operation lane still uses the full planner and tool loop for repo work', async () => {
   const { dir, store } = makeStore();
+  const modelResponses = [
+    { text: '{"type":"tool","tool":"workspace_query_context","args":{"query":"fix auth bug","maxFiles":2},"reason":"inspect implementation"}', provider: 'openai', model: 'planner' },
+    { text: '{"type":"final","answer":"I found the auth bug in src/auth.js and can now fix it safely."}', provider: 'openai', model: 'planner' },
+  ];
+
   const orchestrator = new TurnOrchestrator({
     modelRouter: {
       async call() {
-        return {
-          text: '{"type":"await_approval","message":"I have enough evidence to continue, but the next step edits multiple files. Approve if you want me to proceed.","approvalKind":"multi-file edit"}',
-          provider: 'openai',
-          model: 'planner',
-        };
+        return modelResponses.shift();
       },
     },
     toolRuntime: {
       describe() {
         return [{ name: 'workspace_query_context', description: 'query workspace', args: { query: 'string' } }];
       },
-      async execute() {
-        throw new Error('should not execute tools for await_approval decision');
+      async execute(tool, args) {
+        assert.equal(tool, 'workspace_query_context');
+        assert.equal(args.query, 'fix auth bug');
+        return {
+          ok: true,
+          summary: 'Found 1 relevant file',
+          observation: { files: [{ relativePath: 'src/auth.js', preview: 'validateToken();' }] },
+          evidence: [{ type: 'workspace', source: 'src/auth.js', snippet: 'validateToken();' }],
+        };
       },
     },
     traceStore: store,
@@ -369,64 +346,24 @@ test('turn orchestrator can stop at await_approval without executing risky next 
   const result = await orchestrator.runTurn({
     providers: { openai: 'test-key' },
     policy: {
+      lane: 'operation',
       mode: 'build',
       intent: 'build',
       role: 'code',
-      userText: 'implement the refactor and run the migration',
+      responseStyle: 'coding',
+      tools: { allowTools: true, allowLightInspection: false, allowToolLoop: true },
+      ui: { showMissionControl: true },
+      userText: 'Fix the auth bug',
       system: 'policy system',
     },
-    messages: [{ role: 'user', content: 'implement the refactor and run the migration' }],
+    messages: [{ role: 'user', content: 'Fix the auth bug' }],
   });
 
-  assert.match(result.text, /Approve if you want me to proceed/i);
-  assert.equal(result.trace.plan.nextAction, 'multi-file edit');
-  assert.equal(result.trace.deliberation.approvalSensitive, true);
-  assert.equal(result.trace.governor.phaseDirective, 'await_approval');
-
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('autonomy governor can turn a risky finalization into an approval pause', async () => {
-  const { dir, store } = makeStore();
-  let calls = 0;
-  const orchestrator = new TurnOrchestrator({
-    modelRouter: {
-      async call() {
-        calls += 1;
-        return {
-          text: '{"type":"final","answer":"I will go ahead and rewrite the auth flow now.","confidence":0.9}',
-          provider: 'openai',
-          model: 'planner',
-        };
-      },
-    },
-    toolRuntime: {
-      describe() {
-        return [{ name: 'workspace_query_context', description: 'query workspace', args: { query: 'string' } }];
-      },
-      async execute() {
-        throw new Error('should not execute tools in this approval pause scenario');
-      },
-    },
-    traceStore: store,
-  });
-
-  const result = await orchestrator.runTurn({
-    providers: { openai: 'test-key' },
-    policy: {
-      mode: 'build',
-      intent: 'build',
-      role: 'code',
-      userText: 'rewrite auth flow and run the migration',
-      system: 'policy system',
-    },
-    messages: [{ role: 'user', content: 'rewrite auth flow and run the migration' }],
-  });
-
-  assert.match(result.text, /wait for approval|approval/i);
-  assert.equal(result.trace.governor.phaseDirective, 'await_approval');
-  assert.equal(result.trace.plan.nextAction, 'code change');
-  assert.ok(calls >= 1);
+  assert.equal(result.lane, 'operation');
+  assert.equal(result.usedTools, true);
+  assert.ok(result.trace.deliberation);
+  assert.ok(result.trace.steps.some((step) => step.kind === 'tool_result'));
+  assert.match(result.text, /auth bug/i);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });

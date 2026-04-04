@@ -23,10 +23,13 @@ class TurnTraceStore {
       meta: {
         mode: meta.mode || 'ask',
         profile: meta.profile || 'deliberate',
+        lane: meta.lane || 'analysis',
         intent: meta.intent || 'chat',
+        responseStyle: meta.responseStyle || null,
         role: meta.role || 'analyze',
         userText: String(meta.userText || ''),
         toolLoop: Boolean(meta.toolLoop),
+        ui: meta.ui && typeof meta.ui === 'object' ? { ...meta.ui } : null,
         actor: meta.actor && typeof meta.actor === 'object' ? { ...meta.actor } : null,
       },
       deliberation: meta.deliberation || null,

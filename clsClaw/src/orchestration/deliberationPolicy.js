@@ -1,14 +1,40 @@
 'use strict';
 
 const { normalizeExecutionProfile } = require('./executionProfiles');
+const { extractWorkflowDirective, stripWorkflowDirective } = require('../llm/conversationRouter');
 
 function classifyDeliberation({ policy = {}, messages = [], trace = null } = {}) {
+  const lane = String(policy.lane || '');
   const workflowDirective = extractWorkflowDirective(policy.userText || extractUserText(messages));
   const intent = String(policy.intent || 'chat');
   const mode = String(policy.mode || 'ask');
   const executionProfile = normalizeExecutionProfile(policy.executionProfile || policy.profile);
   const userText = String(stripWorkflowDirective(policy.userText || '')).trim();
   const text = userText.toLowerCase();
+  if (lane && lane !== 'operation') {
+    return {
+      lane,
+      intent,
+      mode,
+      inspectFirst: false,
+      askUserFirst: false,
+      approvalSensitive: false,
+      needsVerification: false,
+      evidenceSufficient: true,
+      evidenceDemand: 'low',
+      risk: 'low',
+      ambiguity: 'low',
+      autonomyAllowance: 'full',
+      executionProfile: executionProfile.id,
+      autonomyBudget: executionProfile.autonomyBudget || null,
+      workflowDirective,
+      writeScope: 'single_file',
+      externalActionRequested: false,
+      hostSensitiveAction: false,
+      initialPhase: 'final',
+      reasons: ['non-operational lane bypassed deliberation'],
+    };
+  }
   const hasImages = containsImages(messages);
   const currentEvidenceCount = Array.isArray(trace?.evidence) ? trace.evidence.length : 0;
   const currentWorkspaceEvidence = countEvidenceTypes(trace?.evidence, ['workspace', 'shell', 'connector_resource']);
@@ -16,6 +42,7 @@ function classifyDeliberation({ policy = {}, messages = [], trace = null } = {})
   const hasAnyEvidence = currentEvidenceCount > 0;
   const hasGroundedEvidence = currentWorkspaceEvidence > 0 || currentExternalEvidence > 0;
   const mentionsConcreteArtifact = /\b(src\/|app\/|test\/|\.js\b|\.ts\b|\.tsx\b|\.py\b|readme|package\.json|memory\.md)\b/i.test(userText);
+  const planNeedsInspection = intent === 'plan' && /\b(repo|repository|codebase|workspace|project structure|architecture|compare|inspect|analyze|files?)\b/.test(text);
 
   const reasons = [];
   let riskScore = 0;
@@ -27,7 +54,7 @@ function classifyDeliberation({ policy = {}, messages = [], trace = null } = {})
   const externalActionRequested = /\b(email|calendar|telegram|discord|whatsapp|post|publish|deploy|upload|message|notify|submit|payment|checkout)\b/.test(text);
   const hostSensitiveAction = /\b(docker|curl|wget|open|osascript|xdg-open|browser|gh\b|ssh)\b/.test(text);
 
-  if (['build', 'review', 'test'].includes(intent) || mode === 'build') {
+  if (['build', 'review', 'test'].includes(intent)) {
     riskScore += 2;
     verificationNeed = intent === 'review' ? 'medium' : 'high';
     reasons.push('code-affecting request');
@@ -93,7 +120,7 @@ function classifyDeliberation({ policy = {}, messages = [], trace = null } = {})
     reasons.push('request implies multi-file changes');
   }
 
-  if (['repo_analysis', 'review', 'build', 'test', 'docs', 'plan'].includes(intent) || hasImages) {
+  if (['repo_analysis', 'review', 'build', 'test', 'docs'].includes(intent) || planNeedsInspection || hasImages) {
     evidenceDemandScore = Math.max(0, evidenceDemandScore + Number(executionProfile.inspectBias || 0));
   }
   if (Number(executionProfile.verificationBias || 0) > 0 && verificationNeed === 'low' && ['build', 'review', 'test', 'docs'].includes(intent)) {
@@ -107,7 +134,8 @@ function classifyDeliberation({ policy = {}, messages = [], trace = null } = {})
   }
 
   const inspectFirst = evidenceDemandScore > 0
-    || ['repo_analysis', 'review', 'docs', 'plan'].includes(intent)
+    || ['repo_analysis', 'review', 'docs'].includes(intent)
+    || planNeedsInspection
     || hasImages
     || (intent === 'build' && mentionsConcreteArtifact);
   const evidenceSufficient = inspectFirst
@@ -124,7 +152,7 @@ function classifyDeliberation({ policy = {}, messages = [], trace = null } = {})
     autonomyAllowance = 'clarify_if_blocked';
   }
 
-  const approvalSensitive = riskScore >= 3 || /\b(delete|remove|install|upgrade|run)\b/.test(text) || mode === 'build' || externalActionRequested || hostSensitiveAction;
+  const approvalSensitive = riskScore >= 3 || /\b(delete|remove|install|upgrade|run)\b/.test(text) || externalActionRequested || hostSensitiveAction;
   const needsVerification = verificationNeed === 'high' || (verificationNeed === 'medium' && riskScore >= 2) || /\b(test|verify|check)\b/.test(text);
   const askUserFirst = ambiguityScore >= 2
     && !hasGroundedEvidence
@@ -160,16 +188,6 @@ function classifyDeliberation({ policy = {}, messages = [], trace = null } = {})
           : 'final',
     reasons,
   };
-}
-
-function extractWorkflowDirective(text = '') {
-  const raw = String(text || '').trim();
-  const match = raw.match(/^\/([a-z][a-z0-9_-]*)\b/i);
-  return match ? match[1].toLowerCase() : null;
-}
-
-function stripWorkflowDirective(text = '') {
-  return String(text || '').replace(/^\/[a-z][a-z0-9_-]*\b\s*/i, '');
 }
 
 function extractUserText(messages = []) {

@@ -8,6 +8,7 @@ const { classifyDeliberation } = require('../src/orchestration/deliberationPolic
 test('deliberation policy prefers inspect-first for grounded repo analysis', () => {
   const result = classifyDeliberation({
     policy: {
+      lane: 'operation',
       intent: 'repo_analysis',
       mode: 'ask',
       userText: 'Explain this repository and verify the current architecture.',
@@ -23,6 +24,7 @@ test('deliberation policy prefers inspect-first for grounded repo analysis', () 
 test('deliberation policy flags risky build requests as approval sensitive and verification-heavy', () => {
   const result = classifyDeliberation({
     policy: {
+      lane: 'operation',
       intent: 'build',
       mode: 'build',
       userText: 'Implement the refactor and run the migration.',
@@ -38,6 +40,7 @@ test('deliberation policy flags risky build requests as approval sensitive and v
 test('deliberation policy asks first for highly ambiguous short build requests', () => {
   const result = classifyDeliberation({
     policy: {
+      lane: 'operation',
       intent: 'build',
       mode: 'build',
       userText: 'make it better somehow',
@@ -52,6 +55,7 @@ test('deliberation policy asks first for highly ambiguous short build requests',
 test('deliberation policy stays inspect-first instead of ask-first for concrete artifact requests', () => {
   const result = classifyDeliberation({
     policy: {
+      lane: 'operation',
       intent: 'build',
       mode: 'build',
       userText: 'improve src/app.js modal closeout flow',
@@ -66,6 +70,7 @@ test('deliberation policy stays inspect-first instead of ask-first for concrete 
 test('deliberation policy records the selected execution profile', () => {
   const result = classifyDeliberation({
     policy: {
+      lane: 'operation',
       intent: 'repo_analysis',
       mode: 'ask',
       profile: 'parallel',
@@ -81,6 +86,7 @@ test('deliberation policy records the selected execution profile', () => {
 test('deliberation policy treats external actions as approval-first and captures write scope', () => {
   const result = classifyDeliberation({
     policy: {
+      lane: 'operation',
       intent: 'build',
       mode: 'build',
       userText: 'post the update to Discord and refactor multiple files',
@@ -92,4 +98,38 @@ test('deliberation policy treats external actions as approval-first and captures
   assert.equal(result.autonomyAllowance, 'approval_first');
   assert.equal(result.writeScope, 'multi_file');
   assert.equal(result.externalActionRequested, true);
+});
+
+test('deliberation policy bypasses non-operational plain chat turns', () => {
+  const result = classifyDeliberation({
+    policy: {
+      lane: 'plain_chat',
+      intent: 'chat',
+      mode: 'build',
+      userText: 'hi',
+    },
+    messages: [{ role: 'user', content: 'hi' }],
+  });
+
+  assert.equal(result.inspectFirst, false);
+  assert.equal(result.risk, 'low');
+  assert.equal(result.approvalSensitive, false);
+  assert.equal(result.initialPhase, 'final');
+});
+
+test('deliberation policy bypasses non-operational brainstorm turns', () => {
+  const result = classifyDeliberation({
+    policy: {
+      lane: 'brainstorm',
+      intent: 'plan',
+      mode: 'build',
+      userText: 'what can we build now, suggest me a project idea',
+    },
+    messages: [{ role: 'user', content: 'what can we build now, suggest me a project idea' }],
+  });
+
+  assert.equal(result.inspectFirst, false);
+  assert.equal(result.risk, 'low');
+  assert.equal(result.approvalSensitive, false);
+  assert.equal(result.initialPhase, 'final');
 });
