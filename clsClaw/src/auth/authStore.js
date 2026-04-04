@@ -85,7 +85,7 @@ class AuthStore {
     return publicUser(user);
   }
 
-  createSession(userId, { ttlMs = 1000 * 60 * 60 * 24 * 14 } = {}) {
+  createSession(userId, { ttlMs = 1000 * 60 * 60 * 24 * 14, label = '', device = '', userAgent = '', ip = '' } = {}) {
     const user = this._users.find((entry) => entry.id === userId && entry.disabled !== true);
     if (!user) throw new Error('User not found');
     const token = randomBytes(32).toString('hex');
@@ -96,6 +96,10 @@ class AuthStore {
       createdAt: Date.now(),
       expiresAt: Date.now() + ttlMs,
       lastSeenAt: Date.now(),
+      label: normalizeSessionLabel(label, user.displayName || user.username),
+      device: normalizeDeviceLabel(device || inferDeviceFromUserAgent(userAgent)),
+      userAgent: String(userAgent || '').slice(0, 240),
+      ip: String(ip || '').trim().slice(0, 120),
     };
     this._sessions = this._sessions.filter((entry) => Number(entry.expiresAt || 0) > Date.now());
     this._sessions.push(session);
@@ -105,6 +109,19 @@ class AuthStore {
       session: publicSession(session),
       user: publicUser(user),
     };
+  }
+
+  updateSession(id, patch = {}) {
+    const session = this._sessions.find((entry) => entry.id === String(id || ''));
+    if (!session) return null;
+    if (Object.prototype.hasOwnProperty.call(patch, 'label')) {
+      session.label = normalizeSessionLabel(patch.label, session.label || 'Workspace session');
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'device')) {
+      session.device = normalizeDeviceLabel(patch.device || session.device);
+    }
+    this._save();
+    return publicSession(session);
   }
 
   getUserForToken(token) {
@@ -133,6 +150,13 @@ class AuthStore {
     this._sessions = this._sessions.filter((entry) => entry.token !== token);
     if (this._sessions.length !== before) this._save();
     return { ok: true };
+  }
+
+  revokeSessionById(id) {
+    const before = this._sessions.length;
+    this._sessions = this._sessions.filter((entry) => entry.id !== String(id || ''));
+    if (this._sessions.length !== before) this._save();
+    return { ok: true, revoked: before - this._sessions.length };
   }
 
   revokeSessionsForUser(userId) {
@@ -210,13 +234,35 @@ function publicUser(user) {
 
 function publicSession(session) {
   if (!session) return null;
+  const age = Math.max(0, Date.now() - Number(session.lastSeenAt || session.createdAt || 0));
   return {
     id: session.id,
     userId: session.userId,
     createdAt: session.createdAt,
     expiresAt: session.expiresAt,
     lastSeenAt: session.lastSeenAt,
+    label: session.label || 'Workspace session',
+    device: session.device || '',
+    presence: age < 1000 * 60 * 5 ? 'active' : age < 1000 * 60 * 30 ? 'idle' : 'away',
   };
+}
+
+function normalizeSessionLabel(value, fallback = 'Workspace session') {
+  const normalized = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) return String(fallback || 'Workspace session');
+  return normalized.slice(0, 80);
+}
+
+function normalizeDeviceLabel(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+}
+
+function inferDeviceFromUserAgent(userAgent) {
+  const ua = String(userAgent || '').toLowerCase();
+  if (!ua) return '';
+  const platform = ua.includes('mac os') ? 'macOS' : ua.includes('windows') ? 'Windows' : ua.includes('linux') ? 'Linux' : ua.includes('iphone') || ua.includes('ios') ? 'iPhone' : ua.includes('android') ? 'Android' : '';
+  const client = ua.includes('safari') && !ua.includes('chrome') ? 'Safari' : ua.includes('chrome') ? 'Chrome' : ua.includes('firefox') ? 'Firefox' : ua.includes('codex') ? 'Codex app' : ua.includes('mozilla') ? 'Browser' : '';
+  return [platform, client].filter(Boolean).join(' · ');
 }
 
 function normalizeUsername(value) {

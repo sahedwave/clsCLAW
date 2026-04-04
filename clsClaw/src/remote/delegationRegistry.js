@@ -44,6 +44,36 @@ class DelegationRegistry {
     return (this._state.dispatches || []).slice(0, Math.max(1, Number(limit) || 20));
   }
 
+  async pingTarget(id) {
+    const target = this._findTarget(id);
+    if (!target || target.enabled === false) throw new Error('Delegation target not available');
+    if (!this._fetch) throw new Error('Fetch is not available for remote delegation');
+    try {
+      const response = await this._fetch(joinUrl(target.url, '/api/health'), { method: 'GET' });
+      target.lastPingAt = Date.now();
+      target.healthStatus = response.ok ? 'reachable' : 'degraded';
+      target.lastPingError = response.ok ? '' : `HTTP ${response.status}`;
+      this._save();
+      return {
+        ok: response.ok,
+        status: target.healthStatus,
+        lastPingAt: target.lastPingAt,
+        error: target.lastPingError || null,
+      };
+    } catch (err) {
+      target.lastPingAt = Date.now();
+      target.healthStatus = 'unreachable';
+      target.lastPingError = err.message;
+      this._save();
+      return {
+        ok: false,
+        status: target.healthStatus,
+        lastPingAt: target.lastPingAt,
+        error: err.message,
+      };
+    }
+  }
+
   async dispatchTask(targetId, payload = {}) {
     const target = this._findTarget(targetId);
     if (!target || target.enabled === false) throw new Error('Delegation target not available');
@@ -74,11 +104,17 @@ class DelegationRegistry {
       targetId: target.id,
       targetName: target.name,
       goal: JSON.parse(body).goal,
+      role: JSON.parse(body).role,
+      requestedBy: JSON.parse(body).requestedBy || null,
       createdAt: Date.now(),
       ok: response.ok,
       status: response.ok ? 'accepted' : 'error',
       response: parsed,
     };
+    target.lastDispatchAt = record.createdAt;
+    target.lastDispatchStatus = record.status;
+    target.lastDispatchError = response.ok ? '' : (parsed.error || `HTTP ${response.status}`);
+    target.healthStatus = response.ok ? 'reachable' : 'degraded';
     this._state.dispatches.unshift(record);
     this._state.dispatches = this._state.dispatches.slice(0, 100);
     this._save();
@@ -137,6 +173,12 @@ function normalizeTarget(target = {}, keepMissing = false) {
       : String(target.sharedSecret || '').trim(),
     enabled: target.enabled !== false,
     createdAt: Number(target.createdAt || Date.now()),
+    lastDispatchAt: Number(target.lastDispatchAt || 0) || null,
+    lastDispatchStatus: String(target.lastDispatchStatus || '').trim() || '',
+    lastDispatchError: String(target.lastDispatchError || '').trim(),
+    lastPingAt: Number(target.lastPingAt || 0) || null,
+    healthStatus: String(target.healthStatus || '').trim() || '',
+    lastPingError: String(target.lastPingError || '').trim(),
   };
 }
 
@@ -149,6 +191,12 @@ function publicTarget(target) {
     enabled: target.enabled !== false,
     createdAt: target.createdAt,
     sharedSecretConfigured: Boolean(target.sharedSecret),
+    lastDispatchAt: target.lastDispatchAt || null,
+    lastDispatchStatus: target.lastDispatchStatus || null,
+    lastDispatchError: target.lastDispatchError || '',
+    lastPingAt: target.lastPingAt || null,
+    healthStatus: target.healthStatus || null,
+    lastPingError: target.lastPingError || '',
   };
 }
 

@@ -30,14 +30,15 @@ body{min-height:100vh;min-height:100dvh}
 .nav-sep{width:28px;height:1px;background:var(--border);margin:4px 0}
 
 
-.topbar{grid-column:2/-1;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 14px}
+.topbar{grid-column:2/-1;background:linear-gradient(180deg,rgba(17,17,23,0.95),rgba(10,10,15,0.94));border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 14px;box-shadow:0 10px 30px rgba(0,0,0,0.18)}
 .logo{font-size:14px;font-weight:800;letter-spacing:-.5px;color:var(--accent2);white-space:nowrap}
 .logo sup{font-size:9px;color:var(--muted);font-weight:400}
 .badge-v4{font-size:9px;font-family:var(--mono);background:rgba(52,211,153,0.1);color:var(--green);border:1px solid rgba(52,211,153,0.25);padding:2px 7px;border-radius:99px}
 .sb-mode{font-size:10px;font-family:var(--mono);padding:3px 8px;border-radius:5px;border:1px solid var(--border2);color:var(--muted)}
 .sb-mode.docker{color:var(--green);border-color:rgba(52,211,153,0.3)}
+.sb-mode.microvm{color:var(--blue);border-color:rgba(96,165,250,0.3)}
 .sb-mode.restricted{color:var(--amber);border-color:rgba(251,191,36,0.3)}
-.cwd-bar{display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;padding:4px 9px;cursor:pointer;transition:border-color .15s;min-width:0;flex:1;max-width:380px}
+.cwd-bar{display:flex;align-items:center;gap:6px;background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01));border:1px solid var(--border2);border-radius:10px;padding:5px 10px;cursor:pointer;transition:border-color .15s, transform .15s;min-width:0;flex:1;max-width:420px}
 .cwd-bar:hover{border-color:var(--border3)}
 .cwd-path{font-size:11px;font-family:var(--mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
@@ -73,11 +74,13 @@ body{min-height:100vh;min-height:100dvh}
 
 
 .main{display:flex;flex-direction:column;overflow:hidden;background:var(--bg);min-width:0}
-.mission-control{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);background:linear-gradient(180deg, rgba(124,106,247,0.08), rgba(17,17,23,0.92));flex-shrink:0}
+.mission-control{display:flex;align-items:flex-start;gap:14px;padding:14px 18px;border-bottom:1px solid var(--border);background:
+radial-gradient(circle at top left, rgba(124,106,247,0.16), transparent 42%),
+linear-gradient(180deg, rgba(124,106,247,0.08), rgba(17,17,23,0.92));flex-shrink:0}
 .mission-main{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}
-.mission-title{font-size:10px;font-family:var(--mono);color:var(--accent2);text-transform:uppercase;letter-spacing:.08em}
-.mission-summary{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mission-sub{font-size:10px;font-family:var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mission-title{font-size:10px;font-family:var(--mono);color:var(--accent2);text-transform:uppercase;letter-spacing:.12em}
+.mission-summary{font-size:14px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
+.mission-sub{font-size:11px;font-family:var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mission-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .mission-chip{font-size:10px;font-family:var(--mono);padding:4px 8px;border-radius:999px;border:1px solid var(--border2);color:var(--muted);background:var(--bg3)}
 .mission-chip.phase{color:var(--blue);border-color:rgba(96,165,250,0.35)}
@@ -89,11 +92,13 @@ body{min-height:100vh;min-height:100dvh}
 .mission-btn:hover{color:var(--text);background:var(--bg3)}
 
 
-.chat-wrap{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.chat-wrap{flex:1;overflow:hidden;display:flex;flex-direction:column;background:
+radial-gradient(circle at top right, rgba(96,165,250,0.08), transparent 26%),
+radial-gradient(circle at top left, rgba(124,106,247,0.08), transparent 34%)}
 .chat-msgs{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:16px}
 .chat-msgs::-webkit-scrollbar{width:4px}
 .chat-msgs::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
-.welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;text-align:center}
+.welcome{display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;height:100%;gap:16px;text-align:left;max-width:920px;width:100%;margin:0 auto;padding:18px 0 40px}
 .wt{font-size:28px;font-weight:800;letter-spacing:-1.5px}
 .wt em{font-style:normal;color:var(--accent2)}
 .ws{font-size:11px;font-family:var(--mono);color:var(--muted);max-width:320px;line-height:1.9}
@@ -114,6 +119,25 @@ body{min-height:100vh;min-height:100dvh}
 .discover-profile{margin-left:auto;color:var(--amber)}
 .discover-title{font-size:12px;font-weight:700;color:var(--text)}
 .discover-detail{font-size:11px;line-height:1.6;color:var(--muted)}
+.hero-shell{display:flex;flex-direction:column;gap:12px}
+.hero-banner{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(220px,0.8fr);gap:14px;align-items:stretch}
+.hero-copy,.hero-focus-card{border:1px solid rgba(124,106,247,0.18);border-radius:18px;background:
+linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.015)),
+linear-gradient(180deg,rgba(124,106,247,0.08),rgba(17,17,23,0.86));padding:18px}
+.hero-kicker{font-size:10px;font-family:var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent2)}
+.hero-title{margin-top:8px;font-size:34px;line-height:1.04;letter-spacing:-1.8px;font-weight:800;max-width:12ch}
+.hero-text{margin-top:10px;font-size:12px;line-height:1.8;color:var(--muted);max-width:64ch}
+.hero-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.hero-action{padding:8px 12px;border-radius:999px;border:1px solid var(--border2);background:rgba(255,255,255,0.03);color:var(--text);font-size:11px;font-family:var(--mono);cursor:pointer;transition:all .15s}
+.hero-action:hover{border-color:rgba(124,106,247,0.35);background:rgba(124,106,247,0.12);color:var(--accent2)}
+.hero-focus-card{display:flex;flex-direction:column;justify-content:space-between;gap:8px}
+.hero-focus-label,.hero-stat-label{font-size:10px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--hint)}
+.hero-focus-value{font-size:24px;line-height:1.1;font-weight:800;color:var(--text);text-transform:capitalize}
+.hero-focus-detail{font-size:11px;line-height:1.7;color:var(--muted)}
+.hero-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.hero-stat-card{border:1px solid var(--border);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));padding:14px;display:flex;flex-direction:column;gap:7px}
+.hero-stat-value{font-size:15px;font-weight:700;color:var(--text)}
+.hero-stat-detail{font-size:11px;line-height:1.6;color:var(--muted)}
 
 
 .msg{display:flex;flex-direction:column;gap:6px;animation:fadeUp .2s ease}
@@ -225,6 +249,12 @@ pre.cb-body::-webkit-scrollbar-thumb{background:var(--border2)}
 .closeout-card{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
 .closeout-label{font-size:10px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
 .closeout-value{font-size:11px;line-height:1.6;color:var(--text)}
+.next-actions-panel{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:10px}
+.next-actions-title{font-size:10px;font-family:var(--mono);color:var(--green);text-transform:uppercase;letter-spacing:.08em}
+.next-actions-row{display:flex;gap:8px;flex-wrap:wrap}
+.next-action-btn{padding:7px 10px;border-radius:999px;border:1px solid var(--border2);background:rgba(255,255,255,0.02);color:var(--text);font-size:10px;font-family:var(--mono);cursor:pointer;transition:all .15s}
+.next-action-btn:hover{border-color:rgba(52,211,153,0.28);background:rgba(52,211,153,0.08);color:var(--green)}
+.next-actions-copy{font-size:11px;line-height:1.6;color:var(--muted)}
 
 
 .input-wrap{padding:10px 24px 16px;border-top:1px solid var(--border);flex-shrink:0}
@@ -695,6 +725,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
         <span class="mission-chip profile">profile: deliberate</span>
         <span class="mission-chip">state: idle</span>
       </div>
+      <div id="mission-detail"></div>
       <div class="mission-actions">
         <button class="mission-btn" onclick="loadMissionControl()">refresh</button>
         <button class="mission-btn" onclick="setView('chat')">open chat</button>
@@ -705,14 +736,8 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
     <div id="view-chat" class="chat-wrap">
       <div class="chat-msgs" id="chat-msgs">
         <div class="welcome" id="welcome">
-          <div class="wt">Real <em>clsClaw</em>. Built to ship.</div>
-          <div class="ws">evidence-first · approval-first · ask/build control · local provider flexibility</div>
-          <div class="chips">
-            <div class="chip" onclick="go('Perform an evidence-first surgical analysis of my whole project. Separate verified facts from inference, list what makes this product unique, and tell me the biggest risks.', 'ask')"><div class="chip-cat">analyze</div><div class="chip-txt">Surgical analysis</div></div>
-            <div class="chip" onclick="go('Find all bugs in my code and propose fixes with diffs', 'build')"><div class="chip-cat">fix</div><div class="chip-txt">Find & fix bugs</div></div>
-            <div class="chip" onclick="go('Refactor my code for better readability and maintainability', 'build')"><div class="chip-cat">refactor</div><div class="chip-txt">Refactor codebase</div></div>
-            <div class="chip" onclick="go('Add a new feature to my existing project', 'build')"><div class="chip-cat">build</div><div class="chip-txt">Add a feature</div></div>
-          </div>
+          <div id="home-shell-host"></div>
+          <div id="onboarding-host"></div>
           <div id="discoverability-welcome"></div>
           <div id="workspace-pulse"></div>
         </div>
@@ -1178,6 +1203,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
     <label>Sandbox provider</label>
     <select id="cfg-sandbox-provider">
       <option value="auto">Auto</option>
+      <option value="microvm">MicroVM</option>
       <option value="gvisor">gVisor (runsc)</option>
       <option value="docker">Docker</option>
       <option value="restricted">Restricted host mode</option>
@@ -1354,6 +1380,13 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
 <script src="/app/uiModules.js"></script>
 <script src="/app/reviewModules.js"></script>
 <script src="/app/opsModules.js"></script>
+<script src="/app/apiClient.js"></script>
+<script src="/app/domUtils.js"></script>
+<script src="/app/stateStore.js"></script>
+<script src="/app/settingsView.js"></script>
+<script src="/app/githubView.js"></script>
+<script src="/app/agentView.js"></script>
+<script src="/app/missionControl.js"></script>
 <script>
 
 let providerDraft = {
@@ -1382,21 +1415,22 @@ let authState = {
   authenticated: false,
   bootstrapRequired: false,
   user: null,
+  session: null,
 };
 let ghToken = localStorage.getItem('cx4_gh') || '';
 let projectRoot = '';
 let messages = [];
 let openTabs = [], activeTab = null;
 let busy = false;
-let chatMode = localStorage.getItem('cx4_chat_mode') === 'build' ? 'build' : 'ask';
-let executionProfile = ['quick', 'deliberate', 'execute', 'parallel'].includes(localStorage.getItem('cx4_execution_profile'))
-  ? localStorage.getItem('cx4_execution_profile')
-  : 'deliberate';
+let currentView = window.clsClawStateStore?.get('currentView') || 'chat';
+let chatMode = window.clsClawStateStore?.get('chatMode') || 'ask';
+let executionProfile = window.clsClawStateStore?.get('executionProfile') || 'deliberate';
 let currentAttachments = [];
 let indexStats = null;
 let agentsMap = new Map();
 let newFiles = new Set();
 let currentBrowseDir = '';
+let onboardingDismissed = localStorage.getItem('cx4_onboarding_dismissed') === '1';
 
 let skills = [];
 let pluginCatalog = [];
@@ -1405,6 +1439,11 @@ let mcpRegistryEntries = [];
 let currentSwarmPreview = null;
 let currentDiffChangeId = null;
 let liveLogEvents = [];
+let homeWorkspaceSignals = {
+  ecosystem: null,
+  collaboration: null,
+  remote: null,
+};
 let missionState = {
   turnId: null,
   summary: 'Idle. Start a task to see live orchestration state.',
@@ -1419,47 +1458,108 @@ let missionState = {
   updatedAt: null,
 };
 
-async function loadAuthStatus() {
-  const state = await fetch('/api/auth/status')
-    .then((response) => response.json())
-    .catch(() => ({ configured: false, authenticated: false, bootstrapRequired: true, user: null }));
-  authState = {
-    configured: !!state.configured,
-    authenticated: !!state.authenticated,
-    bootstrapRequired: !!state.bootstrapRequired,
-    user: state.user || null,
+function getSettingsViewCtx() {
+  return {
+    api,
+    esc,
+    timeAgo,
+    toast,
+    closeModal,
+    init,
+    isMaskedSecret,
+    updateApiKeyWarning,
+    refreshHealthPill,
+    loadFiles,
+    getProjectRoot: () => projectRoot,
+    getAuthState: () => authState,
+    setAuthState(next) { authState = { ...authState, ...next }; return authState; },
+    afterSettingsSave({ root, githubToken, providers }) {
+      projectRoot = root || projectRoot;
+      currentBrowseDir = projectRoot;
+      ghToken = githubToken;
+      if (ghToken) localStorage.setItem('cx4_gh', ghToken);
+      else localStorage.removeItem('cx4_gh');
+      document.getElementById('cwd-disp').textContent = shortPath(projectRoot);
+      applyProviderState(providers || null);
+    },
   };
-  updateAuthChrome();
-  return authState;
+}
+
+function getGitHubViewCtx() {
+  return {
+    api,
+    esc,
+    timeAgo,
+    toast,
+    showGhOut,
+    loadFiles,
+    setGhToken(token) {
+      ghToken = token;
+      localStorage.setItem('cx4_gh', ghToken);
+    },
+  };
+}
+
+function getAgentViewCtx() {
+  return {
+    api,
+    esc,
+    timeAgo,
+    timeDiff,
+    shortPath,
+    toast,
+    currentApiKey,
+    updateBadge,
+    setView,
+    getChatMode: () => chatMode,
+    getCurrentSwarmPreview: () => currentSwarmPreview,
+    setCurrentSwarmPreview(value) { currentSwarmPreview = value; },
+    renderSwarmPreview,
+    loadAgents,
+  };
+}
+
+function getMissionControlCtx() {
+  return {
+    api,
+    getExecutionProfile: () => executionProfile,
+    getMissionState: () => missionState,
+    setMissionState(next) { missionState = next; return missionState; },
+    getChatMode: () => chatMode,
+    setChatMode,
+    setExecutionProfile,
+    setCurrentView(value) { currentView = value; return currentView; },
+    loadWorktrees,
+    loadAgents,
+    loadConnectors,
+    loadJobs,
+    loadGitHubWebhooks,
+    loadChanges,
+    loadPermissions,
+    refreshCtxStats,
+    loadPlans,
+    loadMemoryStats,
+    loadIdentityFiles,
+    loadSecurityAudit,
+    loadVersionFiles,
+    resetBadge,
+    autoResize,
+    setView(v) {
+      return window.clsClawMissionControl.setView(getMissionControlCtx(), v);
+    },
+  };
+}
+
+async function loadAuthStatus() {
+  return window.clsClawSettingsView.loadAuthStatus(getSettingsViewCtx());
 }
 
 function updateAuthChrome() {
-  const badge = document.getElementById('auth-badge');
-  if (!badge) return;
-  if (!authState.configured) {
-    badge.textContent = 'auth: bootstrap';
-    return;
-  }
-  if (!authState.authenticated) {
-    badge.textContent = 'auth: sign in';
-    return;
-  }
-  const role = authState.user?.role ? ` · ${authState.user.role}` : '';
-  badge.textContent = `${authState.user?.username || 'user'}${role}`;
+  return window.clsClawSettingsView.updateAuthChrome(getSettingsViewCtx());
 }
 
 function openAuthModal(allowClose = false) {
-  const modal = document.getElementById('modal-auth');
-  if (!modal) return;
-  const bootstrap = !!authState.bootstrapRequired;
-  document.getElementById('auth-title').textContent = bootstrap ? 'Create local admin account' : 'Sign in';
-  document.getElementById('auth-copy').textContent = bootstrap
-    ? 'Set the first local admin account for this clsClaw workspace.'
-    : 'Authenticate to unlock the local clsClaw workspace.';
-  document.getElementById('auth-display-label').style.display = bootstrap ? 'block' : 'none';
-  document.getElementById('auth-display-name').style.display = bootstrap ? 'block' : 'none';
-  document.getElementById('auth-cancel-btn').style.display = allowClose ? 'inline-flex' : 'none';
-  modal.style.display = 'flex';
+  return window.clsClawSettingsView.openAuthModal(getSettingsViewCtx(), allowClose);
 }
 
 function closeAuthModalIfAllowed() {
@@ -1467,124 +1567,31 @@ function closeAuthModalIfAllowed() {
 }
 
 async function submitAuth() {
-  const username = document.getElementById('auth-username').value.trim();
-  const password = document.getElementById('auth-password').value;
-  const displayName = document.getElementById('auth-display-name').value.trim();
-  const endpoint = authState.bootstrapRequired ? '/api/auth/bootstrap' : '/api/auth/login';
-  const payload = authState.bootstrapRequired ? { username, password, displayName } : { username, password };
-  const result = await api('POST', endpoint, payload).catch((err) => {
-    toast(err.message, 'err');
-    return null;
-  });
-  if (!result) return;
-  document.getElementById('auth-username').value = '';
-  document.getElementById('auth-password').value = '';
-  document.getElementById('auth-display-name').value = '';
-  authState = {
-    configured: true,
-    authenticated: true,
-    bootstrapRequired: false,
-    user: result.user || null,
-  };
-  updateAuthChrome();
-  closeModal('modal-auth');
-  await init(true);
+  return window.clsClawSettingsView.submitAuth(getSettingsViewCtx());
 }
 
 async function logoutAuth() {
-  await api('POST', '/api/auth/logout', {}).catch(() => null);
-  authState = {
-    configured: true,
-    authenticated: false,
-    bootstrapRequired: false,
-    user: null,
-  };
-  updateAuthChrome();
-  openAuthModal(false);
+  return window.clsClawSettingsView.logoutAuth(getSettingsViewCtx());
 }
 
 async function loadAuthUsers() {
-  const summary = document.getElementById('auth-settings-summary');
-  const list = document.getElementById('auth-users-list');
-  const sessionsHost = document.getElementById('auth-sessions-list');
-  const activityHost = document.getElementById('auth-activity-list');
-  const addUserBtn = document.getElementById('auth-add-user-btn');
-  if (!summary || !list) return;
-  const role = authState.user?.role || 'viewer';
-  if (!authState.authenticated) {
-    summary.textContent = 'You are not signed in.';
-    list.innerHTML = '';
-    if (sessionsHost) sessionsHost.innerHTML = '';
-    if (activityHost) activityHost.innerHTML = '';
-    if (addUserBtn) addUserBtn.style.display = 'none';
-    return;
-  }
-  summary.textContent = `Signed in as ${authState.user?.displayName || authState.user?.username || 'user'} (${role}).`;
-  if (addUserBtn) addUserBtn.style.display = role === 'admin' ? 'inline-flex' : 'none';
-  if (role !== 'admin') {
-    list.innerHTML = `<div style="font-size:11px;color:var(--muted)">Only admins can create or list local users.</div>`;
-    if (sessionsHost) sessionsHost.innerHTML = '';
-    if (activityHost) activityHost.innerHTML = '';
-    return;
-  }
-  const users = await api('GET', '/api/auth/users').catch(() => []);
-  const sessions = await api('GET', '/api/auth/sessions').catch(() => []);
-  const activity = await api('GET', '/api/collab/activity?limit=6').catch(() => []);
-  const usersById = new Map((users || []).map((user) => [user.id, user]));
-  list.innerHTML = (users || []).map((user) => `
-    <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--bg2);display:flex;align-items:center;gap:8px">
-      <div style="flex:1">
-        <div style="font-size:12px;font-weight:700">${esc(user.displayName || user.username)}</div>
-        <div style="font-size:10px;font-family:var(--mono);color:var(--muted)">${esc(user.username)} · ${esc(user.role || 'member')}</div>
-      </div>
-      <span class="review-anchor exact">${esc(user.disabled ? 'disabled' : 'active')}</span>
-      ${authState.user?.id !== user.id ? `<button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="toggleAuthUser('${user.id}', ${user.disabled ? 'false' : 'true'})">${user.disabled ? 'enable' : 'disable'}</button>` : ''}
-    </div>
-  `).join('') || `<div style="font-size:11px;color:var(--muted)">No local users yet.</div>`;
-  if (sessionsHost) {
-    sessionsHost.innerHTML = `<div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--hint)">Active sessions</div>${
-      (sessions || []).length
-        ? sessions.map((session) => `<div style="font-size:11px;color:var(--muted)">${esc(usersById.get(session.userId)?.username || session.userId)} · ${esc(timeAgo(session.lastSeenAt || session.createdAt))}</div>`).join('')
-        : `<div style="font-size:11px;color:var(--muted)">No active sessions.</div>`
-    }`;
-  }
-  if (activityHost) {
-    activityHost.innerHTML = `<div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--hint)">Recent collaboration activity</div>${
-      (activity || []).length
-        ? activity.map((item) => `<div style="font-size:11px;color:var(--muted)">${esc(item.actor?.username || 'system')} · ${esc(item.kind)} · ${esc(item.status || '')} · ${esc(item.title || '')}</div>`).join('')
-        : `<div style="font-size:11px;color:var(--muted)">No recent activity yet.</div>`
-    }`;
-  }
+  return window.clsClawSettingsView.loadAuthUsers(getSettingsViewCtx());
 }
 
 async function toggleAuthUser(id, disabled) {
-  const result = await api('PATCH', `/api/auth/users/${id}`, { disabled }).catch((err) => {
-    toast(err.message, 'err');
-    return null;
-  });
-  if (!result?.ok) return;
-  toast(`✓ User ${disabled ? 'disabled' : 'enabled'}`, 'ok');
-  loadAuthUsers();
+  return window.clsClawSettingsView.toggleAuthUser(getSettingsViewCtx(), id, disabled);
 }
 
 async function createAuthUser() {
-  if (authState.user?.role !== 'admin') {
-    toast('Admin access required', 'err');
-    return;
-  }
-  const username = prompt('New username');
-  if (username === null) return;
-  const password = prompt('Temporary password (min 8 characters)');
-  if (password === null) return;
-  const displayName = prompt('Display name (optional)') ?? '';
-  const role = prompt('Role: admin, member, or viewer', 'member');
-  const result = await api('POST', '/api/auth/users', { username, password, displayName, role }).catch((err) => {
-    toast(err.message, 'err');
-    return null;
-  });
-  if (!result?.ok) return;
-  toast(`✓ Added user ${result.user.username}`, 'ok');
-  loadAuthUsers();
+  return window.clsClawSettingsView.createAuthUser(getSettingsViewCtx());
+}
+
+async function renameAuthSession(id) {
+  return window.clsClawSettingsView.renameAuthSession(getSettingsViewCtx(), id);
+}
+
+async function revokeAuthSession(id) {
+  return window.clsClawSettingsView.revokeAuthSession(getSettingsViewCtx(), id);
 }
 
 
@@ -1611,8 +1618,8 @@ async function init(isRetry = false) {
   if (cfg.sandboxInfo) {
     const sb = document.getElementById('sb-badge');
     const mode = cfg.sandboxInfo.mode || 'restricted';
-    sb.textContent = mode === 'gvisor' ? '🛡 gvisor' : mode === 'docker' ? '🐳 docker' : '⚠ restricted';
-    sb.className = 'sb-mode ' + (mode === 'restricted' ? 'restricted' : 'docker');
+    sb.textContent = mode === 'microvm' ? '🧊 microvm' : mode === 'gvisor' ? '🛡 gvisor' : mode === 'docker' ? '🐳 docker' : '⚠ restricted';
+    sb.className = 'sb-mode ' + (mode === 'restricted' ? 'restricted' : mode === 'microvm' ? 'microvm' : 'docker');
   }
 
   await loadFiles();
@@ -1870,128 +1877,45 @@ function updateAgentStatus(agent) {
 }
 
 async function api(method, path, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (body) opts.body = JSON.stringify(body);
-  const r = await fetch(path, opts);
-  const data = await r.json().catch(() => ({}));
-  if (r.status === 401) {
-    authState = {
-      ...authState,
-      authenticated: false,
-    };
-    openAuthModal(false);
-  }
-  if (!r.ok) throw new Error(data.error || r.statusText);
-  return data;
+  return window.clsClawApiClient.request(method, path, body, {
+    onUnauthorized() {
+      authState = {
+        ...authState,
+        authenticated: false,
+      };
+      openAuthModal(false);
+    },
+  });
 }
 
 function renderMissionControl() {
-  const summaryEl = document.getElementById('mission-summary');
-  const subEl = document.getElementById('mission-sub');
-  const chipsEl = document.getElementById('mission-chips');
-  if (!summaryEl || !subEl || !chipsEl) return;
-  const profile = missionState.profile || executionProfile || 'deliberate';
-  const phase = missionState.phase || 'idle';
-  summaryEl.textContent = missionState.summary || 'Idle. Start a task to see live orchestration state.';
-  subEl.textContent = missionState.subtext || `profile=${profile} · phase=${phase}`;
-  chipsEl.innerHTML = window.clsClawModules?.renderMissionControlChips
-    ? window.clsClawModules.renderMissionControlChips({ missionState, executionProfile })
-    : '';
+  return window.clsClawMissionControl.renderMissionControl(getMissionControlCtx());
 }
 
 function updateMissionControl(patch = {}) {
-  missionState = {
-    ...missionState,
-    ...patch,
-    updatedAt: Date.now(),
-  };
-  renderMissionControl();
+  const result = window.clsClawMissionControl.updateMissionControl(getMissionControlCtx(), patch);
+  renderDiscoverabilityPanels();
+  return result;
 }
 
 function hydrateMissionFromTurn(turn) {
-  if (!turn) return;
-  updateMissionControl({
-    turnId: turn.id || null,
-    summary: turn.meta?.userText || turn.plan?.summary || 'Recent turn',
-    subtext: [
-      turn.meta?.intent ? `intent=${turn.meta.intent}` : '',
-      turn.meta?.role ? `role=${turn.meta.role}` : '',
-      turn.final?.provider ? `provider=${turn.final.provider}` : '',
-    ].filter(Boolean).join(' · ') || 'Recent turn',
-    profile: turn.meta?.profile || turn.plan?.executionProfile || missionState.profile,
-    phase: turn.plan?.phase || turn.status || 'idle',
-    nextAction: turn.plan?.nextAction || 'wait',
-    evidenceStatus: turn.governor?.evidenceStatus || null,
-    evidenceSummary: turn.evidenceBundle?.summary || '',
-    approvalRequired: Boolean(turn.governor?.shouldPauseForApproval || turn.plan?.approvalRequired),
-    privacySummary: missionState.privacySummary || '',
-  });
+  return window.clsClawMissionControl.hydrateMissionFromTurn(getMissionControlCtx(), turn);
 }
 
 async function loadMissionControl() {
-  const recent = await api('GET', '/api/turns/recent?limit=1').catch(() => []);
-  if (Array.isArray(recent) && recent.length) {
-    hydrateMissionFromTurn(recent[0]);
-  } else {
-    updateMissionControl({
-      turnId: null,
-      summary: 'Idle. Start a task to see live orchestration state.',
-      subtext: `No active turn · ${executionProfile} profile`,
-      profile: executionProfile,
-      phase: 'idle',
-      nextAction: 'wait',
-      evidenceStatus: null,
-      evidenceSummary: '',
-      approvalRequired: false,
-      privacySummary: missionState.privacySummary || '',
-    });
-  }
+  return window.clsClawMissionControl.loadMissionControl(getMissionControlCtx());
 }
 
 async function loadPrivacySummary() {
-  const data = await api('GET', '/api/privacy').catch(() => null);
-  if (!data) return;
-  const mode = data.remoteInferencePossible ? 'remote-capable' : data.localOnlyReady ? 'local-ready' : 'provider-pending';
-  updateMissionControl({
-    privacySummary: `privacy=${mode} · storage=local`,
-  });
+  return window.clsClawMissionControl.loadPrivacySummary(getMissionControlCtx());
 }
 
-const VIEWS = ['chat','changes','perms','agents','worktrees','skills','apps','auto','github','ctx','plan','memory','identity','security'];
 function setView(v) {
-  VIEWS.forEach(id => {
-    const el = document.getElementById('view-'+id);
-    if (el) el.style.display = 'none';
-    const nb = document.getElementById('nav-'+id);
-    if (nb) nb.classList.remove('active');
-  });
-  const el = document.getElementById('view-'+v);
-  if (el) el.style.display = 'flex';
-  const nb = document.getElementById('nav-'+v);
-  if (nb) nb.classList.add('active');
-  if (v === 'worktrees') loadWorktrees();
-  if (v === 'agents')   loadAgents();
-  if (v === 'apps')     loadConnectors();
-  if (v === 'auto')     loadJobs();
-  if (v === 'github')   loadGitHubWebhooks();
-  if (v === 'changes')  { loadChanges(); resetBadge('changes-badge'); }
-  if (v === 'perms')    { loadPermissions(); resetBadge('perms-badge'); }
-  if (v === 'ctx')      refreshCtxStats();
-  if (v === 'plan')     loadPlans();
-  if (v === 'memory')   loadMemoryStats();
-  if (v === 'identity') loadIdentityFiles();
-  if (v === 'security') loadSecurityAudit();
+  return window.clsClawMissionControl.setView(getMissionControlCtx(), v);
 }
 
 function setRpTab(t) {
-  ['editor','agents','history','logs'].forEach(id => {
-    document.getElementById('rp-'+id).style.display = 'none';
-    document.getElementById('rpt-'+id)?.classList.remove('active');
-  });
-  document.getElementById('rp-'+t).style.display = 'flex';
-  document.getElementById('rpt-'+t)?.classList.add('active');
-  if (t === 'history') loadVersionFiles();
-  if (t === 'agents') loadAgents();
+  return window.clsClawMissionControl.setRpTab(getMissionControlCtx(), t);
 }
 
 async function loadFiles(dir) {
@@ -2163,7 +2087,7 @@ function renderChangeCard(c) {
         🌿 worktree: ${esc(shortPath(c.worktreePath))}
       </div>` : ''}
     <div style="padding:6px 11px;font-size:11px;font-family:var(--mono);color:var(--muted)">${esc(c.description)}</div>
-    ${renderApprovalContextPanel(c.approvalContext)}
+    ${renderApprovalContextPanel(c.approvalContext, { proposedBy: c.proposedBy, resolvedBy: c.resolvedBy })}
     <div class="change-actions">
       <button class="view-diff-btn" onclick="showDiff('${c.id}')">view diff</button>
       <button class="approve-btn" ${isConflict ? 'disabled title="Resolve conflict first"' : ''} onclick="approveChange('${c.id}')">
@@ -2180,12 +2104,18 @@ function describePendingChange(change) {
   return shortPath(change.filePath);
 }
 
-function renderApprovalContextPanel(ctx) {
-  if (!ctx) return '';
+function renderApprovalContextPanel(ctx, options = {}) {
+  if (!ctx && !options.proposedBy && !options.resolvedBy) return '';
   const reasons = Array.isArray(ctx.reasons) ? ctx.reasons.filter(Boolean).slice(0, 4) : [];
+  const proposedBy = options.proposedBy || null;
+  const resolvedBy = options.resolvedBy || null;
   return `<div class="review-section">
     <div class="review-section-title">Approval rationale</div>
     <div style="font-size:11px;color:var(--muted);line-height:1.6">${esc(ctx.summary || 'This step is gated for approval.')}</div>
+    ${(proposedBy || resolvedBy) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      ${proposedBy ? `<span class="review-source-pill">proposed by ${esc(proposedBy.displayName || proposedBy.username || proposedBy.id || 'user')}</span>` : ''}
+      ${resolvedBy ? `<span class="review-source-pill">resolved by ${esc(resolvedBy.displayName || resolvedBy.username || resolvedBy.id || 'user')}</span>` : ''}
+    </div>` : ''}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:10px;font-family:var(--mono);color:var(--muted)">
       ${ctx.kind ? `<span class="review-anchor exact">${esc(ctx.kind)}</span>` : ''}
       ${ctx.risk ? `<span>risk=${esc(ctx.risk)}</span>` : ''}
@@ -2249,6 +2179,10 @@ function renderReviewCard(c) {
     </div>
     <div class="review-shell">
       <div style="font-size:11px;font-family:var(--mono);color:var(--muted)">${esc(reviewBundle?.summary || c.summary || 'Skill completed')}</div>
+      ${(reviewBundle?.actors?.proposedBy || reviewBundle?.actors?.resolvedBy || c.proposedBy || c.resolvedBy) ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${(reviewBundle?.actors?.proposedBy || c.proposedBy) ? `<span class="review-source-pill">proposed by ${esc(reviewBundle?.actors?.proposedBy?.displayName || reviewBundle?.actors?.proposedBy?.username || c.proposedBy?.displayName || c.proposedBy?.username || 'user')}</span>` : ''}
+        ${(reviewBundle?.actors?.resolvedBy || c.resolvedBy) ? `<span class="review-source-pill">resolved by ${esc(reviewBundle?.actors?.resolvedBy?.displayName || reviewBundle?.actors?.resolvedBy?.username || c.resolvedBy?.displayName || c.resolvedBy?.username || 'user')}</span>` : ''}
+      </div>` : ''}
       <div class="review-summary-grid">
         <div class="review-metric">
           <div class="review-metric-label">Inline comments</div>
@@ -2272,7 +2206,7 @@ function renderReviewCard(c) {
         </div>
       </div>
       ${githubStatus}
-      ${renderApprovalContextPanel(c.approvalContext)}
+      ${renderApprovalContextPanel(c.approvalContext, { proposedBy: c.proposedBy || reviewBundle?.actors?.proposedBy, resolvedBy: c.resolvedBy || reviewBundle?.actors?.resolvedBy })}
       ${window.clsClawReviewModules?.renderReviewEvidenceSection ? window.clsClawReviewModules.renderReviewEvidenceSection(reviewBundle, evidenceBundle, makeEvidenceDeckMarkup) : ''}
       ${reviewBundle?.visualDebug && window.clsClawReviewModules?.renderVisualDebugLaneMarkup ? window.clsClawReviewModules.renderVisualDebugLaneMarkup(reviewBundle.visualDebug, { compact: true }) : ''}
       ${reviewBundle?.fixSuggestions?.length ? `<div class="review-section">
@@ -2722,7 +2656,7 @@ async function rejectPermission(id) {
   loadPermissions();
 }
 
-function openAgentModal() { document.getElementById('modal-agent').style.display = 'flex'; }
+function openAgentModal() { return window.clsClawAgentView.openAgentModal(getAgentViewCtx()); }
 
 async function launchAgent() {
   const task         = document.getElementById('ag-task').value.trim();
@@ -2737,64 +2671,11 @@ async function launchAgent() {
 }
 
 async function launchParallelBatch() {
-  const raw = prompt('Enter parallel tasks, one per line. Prefix with "role:name: task" or "role: task".\n\nExample:\nanalyze: repo map\nreview: auth flow risks\ncode: Fix settings modal');
-  if (!raw) return;
-  const tasks = raw.split('\n').map((line) => line.trim()).filter(Boolean).map((line, idx) => {
-    const parts = line.split(':');
-    if (parts.length >= 3) {
-      return {
-        role: parts[0].trim() || 'code',
-        agentName: parts[1].trim() || `Agent ${idx + 1}`,
-        task: parts.slice(2).join(':').trim(),
-        contextQuery: parts.slice(2).join(':').trim(),
-        useWorktree: true,
-      };
-    }
-    if (parts.length === 2) {
-      return {
-        role: parts[0].trim() || 'code',
-        agentName: `Agent ${idx + 1}`,
-        task: parts[1].trim(),
-        contextQuery: parts[1].trim(),
-        useWorktree: true,
-      };
-    }
-    return {
-      role: 'code',
-      agentName: `Agent ${idx + 1}`,
-      task: line,
-      contextQuery: line,
-      useWorktree: true,
-    };
-  }).filter((item) => item.task);
-  if (!tasks.length) return;
-  const result = await api('POST', '/api/agents/orchestrate', {
-    tasks,
-    apiKey: currentApiKey(),
-  }).catch(err => { toast(err.message, 'err'); return null; });
-  if (result?.agents?.length) {
-    toast(`⇉ Launched ${result.agents.length} agent${result.agents.length === 1 ? '' : 's'} in parallel`, 'ok');
-    setView('agents');
-    loadAgents();
-  }
+  return window.clsClawAgentView.launchParallelBatch(getAgentViewCtx());
 }
 
 async function launchSwarmPrompt() {
-  const goal = prompt('Swarm goal:');
-  if (!goal || !goal.trim()) return;
-  const maxAgentsRaw = prompt('Max agents (2-6):', '4');
-  const maxAgents = Math.max(2, Math.min(6, Number(maxAgentsRaw) || 4));
-  const result = await api('POST', '/api/swarm/preview', {
-    goal,
-    maxAgents,
-    apiKey: currentApiKey(),
-  }).catch(err => { toast(err.message, 'err'); return null; });
-  if (result?.tasks?.length) {
-    currentSwarmPreview = result;
-    renderSwarmPreview();
-    toast(`🕸 Swarm preview ready — ${result.tasks.length} specialist task${result.tasks.length === 1 ? '' : 's'}`, 'ok');
-    setView('agents');
-  }
+  return window.clsClawAgentView.launchSwarmPrompt(getAgentViewCtx());
 }
 
 function renderSwarmPreview() {
@@ -2806,166 +2687,49 @@ function renderSwarmPreview() {
 }
 
 async function launchSwarmFromPreview() {
-  if (!currentSwarmPreview?.goal) {
-    toast('No swarm preview ready', 'warn');
-    return;
-  }
-  const result = await api('POST', '/api/swarm', {
-    goal: currentSwarmPreview.goal,
-    maxAgents: currentSwarmPreview.maxAgents || currentSwarmPreview.tasks?.length || 4,
-    apiKey: currentApiKey(),
-  }).catch(err => { toast(err.message, 'err'); return null; });
-  if (result?.agents?.length) {
-    toast(`🕸 Swarm launched — ${result.agents.length} specialist agent${result.agents.length === 1 ? '' : 's'}`, 'ok');
-    currentSwarmPreview = null;
-    renderSwarmPreview();
-    setView('agents');
-    await loadAgents();
-    await loadSwarmSessions();
-  }
+  return window.clsClawAgentView.launchSwarmFromPreview(getAgentViewCtx());
 }
 
 async function loadSwarmSessions() {
-  const host = document.getElementById('swarm-sessions-host');
-  if (!host) return;
-  const sessions = await api('GET', '/api/swarm/sessions?limit=6').catch(() => []);
-  host.innerHTML = window.clsClawOpsModules?.renderSwarmSessions
-    ? window.clsClawOpsModules.renderSwarmSessions(sessions)
-    : '';
+  return window.clsClawAgentView.loadSwarmSessions(getAgentViewCtx());
 }
 
 async function loadDelegationTargets() {
-  const host = document.getElementById('delegation-host');
-  if (!host) return;
-  const targets = await api('GET', '/api/delegation/targets').catch(() => []);
-  const dispatches = await api('GET', '/api/delegation/dispatches?limit=4').catch(() => []);
-  host.innerHTML = `
-    <div class="discover-panel">
-      <div class="discover-heading">
-        <div>
-          <div class="discover-kicker">Remote Delegation</div>
-          <div class="discover-summary">Delegate a task to another clsClaw instance with signed requests.</div>
-        </div>
-        <button class="gh-btn" style="width:auto;padding:6px 10px;margin:0" onclick="createDelegationTarget()">add target</button>
-      </div>
-      ${(targets || []).length ? targets.map((target) => `
-        <div class="discover-card" style="cursor:default;margin-bottom:8px">
-          <div class="discover-top">
-            <span class="discover-label">${esc(target.enabled ? 'enabled' : 'disabled')}</span>
-            <span class="discover-profile">${esc(target.name || 'target')}</span>
-          </div>
-          <div class="discover-detail">${esc(target.url || '')}</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-            <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="dispatchDelegationTarget('${target.id}')">delegate current task</button>
-            <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="toggleDelegationTarget('${target.id}', ${target.enabled ? 'false' : 'true'})">${target.enabled ? 'disable' : 'enable'}</button>
-          </div>
-        </div>
-      `).join('') : `<div style="font-size:11px;color:var(--muted)">No remote delegation targets yet.</div>`}
-      ${(dispatches || []).length ? `<div style="margin-top:10px;font-size:10px;color:var(--hint);text-transform:uppercase;letter-spacing:.08em">Recent dispatches</div>${dispatches.map((item) => `<div style="font-size:11px;color:var(--muted);margin-top:6px">${esc(item.targetName || 'target')} · ${esc(item.status || 'accepted')} · ${esc(item.goal || '')}</div>`).join('')}` : ''}
-    </div>
-  `;
+  const result = await window.clsClawAgentView.loadDelegationTargets(getAgentViewCtx());
+  await loadHomeWorkspaceSignals();
+  return result;
 }
 
 async function loadAgents() {
-  const agents = await api('GET', '/api/agents').catch(() => []);
-  const running = agents.filter(a => a.status === 'running').length;
-  updateBadge('rp-agent-badge', running);
-
-  renderAgentList(agents, 'agents-list', true);
-  renderAgentList(agents.slice(0,4), 'mini-agents', false);
-  loadSwarmSessions();
-  loadDelegationTargets();
+  return window.clsClawAgentView.loadAgents(getAgentViewCtx());
 }
 
 async function createDelegationTarget() {
-  const name = prompt('Remote clsClaw name');
-  if (name === null) return;
-  const url = prompt('Remote clsClaw base URL (for example https://remote.example.com)');
-  if (url === null) return;
-  const sharedSecret = prompt('Shared secret for signed delegation requests');
-  if (sharedSecret === null) return;
-  const result = await api('POST', '/api/delegation/targets', { name, url, sharedSecret }).catch((err) => {
-    toast(err.message, 'err');
-    return null;
-  });
-  if (!result?.ok) return;
-  toast('✓ Delegation target saved', 'ok');
-  loadDelegationTargets();
+  return window.clsClawAgentView.createDelegationTarget(getAgentViewCtx());
 }
 
 async function toggleDelegationTarget(id, enabled) {
-  const result = await api('PATCH', `/api/delegation/targets/${id}`, { enabled }).catch((err) => {
-    toast(err.message, 'err');
-    return null;
-  });
-  if (!result?.ok) return;
-  toast(`✓ Target ${enabled ? 'enabled' : 'disabled'}`, 'ok');
-  loadDelegationTargets();
+  return window.clsClawAgentView.toggleDelegationTarget(getAgentViewCtx(), id, enabled);
+}
+
+async function editDelegationTarget(id) {
+  return window.clsClawAgentView.editDelegationTarget(getAgentViewCtx(), id);
+}
+
+async function deleteDelegationTarget(id) {
+  return window.clsClawAgentView.deleteDelegationTarget(getAgentViewCtx(), id);
+}
+
+async function pingDelegationTarget(id) {
+  return window.clsClawAgentView.pingDelegationTarget(getAgentViewCtx(), id);
 }
 
 async function dispatchDelegationTarget(id) {
-  const goal = (document.getElementById('composer')?.value || '').trim() || prompt('What should the remote clsClaw work on?');
-  if (!goal) return;
-  const result = await api('POST', '/api/delegation/dispatch', { targetId: id, goal, role: currentMode === 'build' ? 'code' : 'analyze' }).catch((err) => {
-    toast(err.message, 'err');
-    return null;
-  });
-  if (!result?.ok) return;
-  toast('✓ Remote delegation dispatched', 'ok');
-  loadDelegationTargets();
+  return window.clsClawAgentView.dispatchDelegationTarget(getAgentViewCtx(), id);
 }
 
 function renderAgentList(agents, containerId, full) {
-  const el = document.getElementById(containerId);
-  if (!agents.length) {
-    el.innerHTML = `<div class="empty-state"><span style="font-size:22px">⚡</span><span>No agents</span></div>`;
-    return;
-  }
-  el.innerHTML = [...agents].reverse().map(a => {
-    const proposalCount = a.proposals?.length || 0;
-    const cmdCount      = a.commands?.length  || 0;
-    const approvedCmds  = (a.commands||[]).filter(c => c.status === 'approved').length;
-    return `
-    <div class="agent-card ${a.status}" data-agent-id="${a.id}">
-      <div class="ag-hdr">
-        <div class="ag-dot ${a.status}"></div>
-        <div class="ag-name">${esc(a.name)}</div>
-        ${a.role && a.role !== 'code' ? `<span style="font-size:9px;font-family:var(--mono);padding:1px 5px;border-radius:3px;background:rgba(124,106,247,0.1);color:var(--accent2)">${esc(a.role)}</span>` : ''}
-        <div class="ag-status">${a.status}${a.endTime ? ' · ' + timeDiff(a.startTime, a.endTime) : a.startTime ? ' · ' + timeAgo(a.startTime) : ''}</div>
-      </div>
-      <div class="ag-task">${esc(a.task)}</div>
-      ${(a.provider || a.model) ? `<div style="font-size:10px;font-family:var(--mono);color:var(--accent2);margin:3px 0">🧠 ${esc([a.provider, a.model].filter(Boolean).join(' · '))}</div>` : ''}
-      ${a.parentAgentId ? `<div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin:2px 0">↳ child of ${esc(a.parentAgentId.slice(0, 8))}</div>` : ''}
-      ${(a.children?.length || 0) > 0 ? `<div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin:2px 0">⇢ ${a.children.length} child agent${a.children.length === 1 ? '' : 's'}</div>` : ''}
-      ${a.pendingInputs ? `<div style="font-size:10px;font-family:var(--mono);color:var(--amber);margin:2px 0">⏳ ${a.pendingInputs} queued follow-up${a.pendingInputs === 1 ? '' : 's'}</div>` : ''}
-      ${a.logs?.length ? `<div class="ag-log">${a.logs.slice(-3).map(l =>
-        `<div class="${l.level==='error'?'l-err':''}">${esc(l.msg)}</div>`
-      ).join('')}</div>` : ''}
-      ${proposalCount > 0 ? `
-        <div style="font-size:10px;font-family:var(--mono);color:var(--blue);margin:4px 0;cursor:pointer" onclick="setView('changes')">
-          📄 ${proposalCount} file proposal${proposalCount!==1?'s':''} — click to review
-        </div>` : ''}
-      ${cmdCount > 0 ? `
-        <div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin:2px 0">
-          ⚡ ${cmdCount} command${cmdCount!==1?'s':''} ${approvedCmds > 0 ? '(' + approvedCmds + ' approved)' : '(pending approval)'}
-        </div>` : ''}
-      ${a.worktreePath ? `
-        <div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin:2px 0">
-          🌿 ${esc(shortPath(a.worktreePath))}
-        </div>` : ''}
-      ${a.error ? `<div style="font-size:10px;font-family:var(--mono);color:var(--red);margin:3px 0">${esc(a.error)}</div>` : ''}
-      <div class="ag-acts">
-        ${a.status === 'running'  ? `<button class="ag-btn cancel" onclick="cancelAgent('${a.id}')">cancel</button>` : ''}
-        ${a.status === 'error'    ? `<button class="ag-btn" onclick="retryAgent('${a.id}')">retry</button>` : ''}
-        <button class="ag-btn" onclick="spawnChildAgent('${a.id}')">spawn child</button>
-        <button class="ag-btn" onclick="sendAgentFollowup('${a.id}', false)">follow-up</button>
-        ${a.status === 'running' ? `<button class="ag-btn" onclick="sendAgentFollowup('${a.id}', true)">interrupt</button>` : ''}
-        <button class="ag-btn" onclick="waitOnAgent('${a.id}')">wait</button>
-        ${a.status !== 'running' ? `<button class="ag-btn" onclick="closeAgent('${a.id}')">close</button>` : ''}
-        ${proposalCount > 0       ? `<button class="ag-btn" onclick="setView('changes')">review changes</button>` : ''}
-      </div>
-    </div>`;
-  }).join('');
+  return window.clsClawAgentView.renderAgentList(getAgentViewCtx(), agents, containerId, full);
 }
 
 async function cancelAgent(id) {
@@ -3186,6 +2950,7 @@ async function loadConnectors() {
 
 async function loadMcpRegistry() {
   mcpRegistryEntries = await api('GET', '/api/mcp/registry').catch(() => []);
+  await loadHomeWorkspaceSignals();
   const host = document.getElementById('mcp-registry-host');
   if (!host) return;
   host.innerHTML = `
@@ -3224,6 +2989,153 @@ async function createMcpRegistryEntry() {
     toast(`✓ MCP entry saved: ${name}`, 'ok');
     loadMcpRegistry();
   }
+}
+
+function mcpPackEntries(packId) {
+  const packs = {
+    dev: [
+      {
+        name: 'Filesystem MCP',
+        description: 'Local filesystem browsing and project file operations for development workflows.',
+        transport: 'stdio',
+        command: 'npx @modelcontextprotocol/server-filesystem',
+        capabilities: ['resources', 'tools', 'filesystem'],
+        trust: { level: 'custom', verified: false, requiresNetwork: false, requiresAuth: false },
+        metadata: { category: 'dev', pack: 'dev' },
+      },
+      {
+        name: 'Docs Browser MCP',
+        description: 'HTTP-friendly documentation and web context retrieval for implementation and debugging.',
+        transport: 'http',
+        url: 'http://127.0.0.1:8787/mcp',
+        capabilities: ['resources', 'docs', 'web'],
+        trust: { level: 'custom', verified: false, requiresNetwork: true, requiresAuth: false },
+        metadata: { category: 'dev', pack: 'dev' },
+      },
+    ],
+    research: [
+      {
+        name: 'arXiv Research MCP',
+        description: 'Research feed and paper metadata retrieval for literature monitoring workflows.',
+        transport: 'http',
+        url: 'http://127.0.0.1:8788/mcp',
+        capabilities: ['resources', 'papers', 'search'],
+        trust: { level: 'custom', verified: false, requiresNetwork: true, requiresAuth: false },
+        metadata: { category: 'research', pack: 'research' },
+      },
+      {
+        name: 'PDF Tables MCP',
+        description: 'Extract tables and structured data from PDFs for research and reporting workflows.',
+        transport: 'stdio',
+        command: 'npx @modelcontextprotocol/server-pdf',
+        capabilities: ['resources', 'pdf', 'tables'],
+        trust: { level: 'custom', verified: false, requiresNetwork: false, requiresAuth: false },
+        metadata: { category: 'research', pack: 'research' },
+      },
+    ],
+  };
+  return packs[packId] || [];
+}
+
+function matchingCustomMcpEntry(candidate) {
+  return mcpRegistryEntries.find((entry) =>
+    entry.source === 'custom' &&
+    String(entry.name || '').trim().toLowerCase() === String(candidate.name || '').trim().toLowerCase() &&
+    String(entry.transport || 'stdio') === String(candidate.transport || 'stdio') &&
+    String(entry.url || '').trim() === String(candidate.url || '').trim() &&
+    String(entry.command || '').trim() === String(candidate.command || '').trim()
+  ) || null;
+}
+
+async function createMcpPack(packId) {
+  const entries = mcpPackEntries(packId);
+  if (!entries.length) {
+    toast('Unknown MCP pack', 'err');
+    return;
+  }
+  let created = 0;
+  let skipped = 0;
+  for (const entry of entries) {
+    const existing = matchingCustomMcpEntry(entry);
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
+    const result = await api('POST', '/api/mcp/registry', entry).catch(err => {
+      toast(err.message, 'err');
+      return null;
+    });
+    if (result?.ok) created += 1;
+  }
+  await loadMcpRegistry();
+  toast(`✓ ${packId} pack ready · added ${created}${skipped ? ` · skipped ${skipped}` : ''}`, 'ok');
+}
+
+function exportMcpRegistry() {
+  const exported = mcpRegistryEntries.filter((entry) => entry.source === 'custom');
+  const blob = new Blob([JSON.stringify({ exportedAt: Date.now(), entries: exported }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `clsclaw-mcp-registry-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 500);
+  toast(`✓ Exported ${exported.length} custom MCP entr${exported.length === 1 ? 'y' : 'ies'}`, 'ok');
+}
+
+async function importMcpRegistry() {
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.accept = 'application/json';
+  picker.onchange = async () => {
+    const file = picker.files && picker.files[0];
+    if (!file) return;
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      toast('Invalid JSON file', 'err');
+      return;
+    }
+    const entries = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.entries) ? parsed.entries : null;
+    if (!entries) {
+      toast('Registry import must be an array or { entries: [...] }', 'err');
+      return;
+    }
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+    for (const rawEntry of entries) {
+      if (!rawEntry || typeof rawEntry !== 'object') {
+        skipped += 1;
+        continue;
+      }
+      const payload = {
+        ...rawEntry,
+        id: undefined,
+        source: undefined,
+        kind: undefined,
+        status: undefined,
+        health: undefined,
+        createdAt: undefined,
+      };
+      const existing = matchingCustomMcpEntry(payload);
+      if (existing) {
+        const result = await api('PATCH', `/api/mcp/registry/${encodeURIComponent(existing.id)}`, payload).catch(() => null);
+        if (result?.ok) updated += 1;
+        else skipped += 1;
+        continue;
+      }
+      const result = await api('POST', '/api/mcp/registry', payload).catch(() => null);
+      if (result?.ok) imported += 1;
+      else skipped += 1;
+    }
+    await loadMcpRegistry();
+    toast(`✓ MCP import complete · added ${imported} · updated ${updated}${skipped ? ` · skipped ${skipped}` : ''}`, 'ok');
+  };
+  picker.click();
 }
 
 function findMcpRegistryEntry(id) {
@@ -3620,6 +3532,10 @@ async function loadArtifacts() {
         <div style="font-size:10px;font-family:var(--mono);color:var(--muted)">${esc(artifact.type || 'artifact')}</div>
       </div>
       <div style="font-size:11px;color:var(--muted);line-height:1.5">${esc(artifact.summary || 'No summary')}</div>
+      ${(artifact.createdBy?.displayName || artifact.createdBy?.username || artifact.updatedBy?.displayName || artifact.updatedBy?.username) ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${artifact.createdBy ? `<span class="review-source-pill">created by ${esc(artifact.createdBy.displayName || artifact.createdBy.username || artifact.createdBy.id || 'user')}</span>` : ''}
+        ${artifact.updatedBy ? `<span class="review-source-pill">updated by ${esc(artifact.updatedBy.displayName || artifact.updatedBy.username || artifact.updatedBy.id || 'user')}</span>` : ''}
+      </div>` : ''}
       <div style="display:flex;gap:8px;align-items:center">
         <div style="font-size:10px;font-family:var(--mono);color:var(--muted);flex:1">${timeAgo(artifact.createdAt)}</div>
         <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="sendArtifactToSlack('${artifact.id}')">send to Slack</button>
@@ -3654,7 +3570,7 @@ async function openArtifact(id) {
         <div style="font-size:12px;font-weight:700;margin-bottom:8px">${esc(artifact.title || 'Artifact')}</div>
         <div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">${esc(artifact.type || 'artifact')} · ${timeAgo(artifact.createdAt)}</div>
         ${artifact.summary ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">${esc(artifact.summary)}</div>` : ''}
-        ${renderArtifactMetadataRows({ ...(artifact.metadata || {}), projectRoot: artifact.projectRoot || '', createdBy: artifact.createdBy?.username || artifact.createdBy?.displayName || '' })}
+        ${renderArtifactMetadataRows({ ...(artifact.metadata || {}), projectRoot: artifact.projectRoot || '', createdBy: artifact.createdBy?.username || artifact.createdBy?.displayName || '', updatedBy: artifact.updatedBy?.username || artifact.updatedBy?.displayName || '' })}
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:8px">
           <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="sendArtifactToSlack('${artifact.id}')">send to Slack</button>
         </div>
@@ -3700,58 +3616,27 @@ async function deleteJob(id) {
 function ghBody(extra = {}) { return { token: document.getElementById('gh-tok').value.trim(), ...extra }; }
 
 async function ghConnect() {
-  const r = await api('POST', '/api/github/user', ghBody()).catch(err => { showGhOut('gh-user-out', err.message, true); return null; });
-  if (r) { ghToken = ghBody().token; localStorage.setItem('cx4_gh', ghToken); showGhOut('gh-user-out', `✓ Connected as @${r.login} (${r.public_repos} repos)`); }
+  return window.clsClawGitHubView.ghConnect(getGitHubViewCtx());
 }
 
 async function ghClone() {
-  const url = document.getElementById('gh-clone-url').value.trim();
-  const r = await api('POST', '/api/github/clone', { ...ghBody(), url }).catch(err => { showGhOut('gh-clone-out', err.message, true); return null; });
-  if (r) { showGhOut('gh-clone-out', r.ok ? '✓ Cloned successfully' : r.error, !r.ok); if (r.ok) loadFiles(); }
+  return window.clsClawGitHubView.ghClone(getGitHubViewCtx());
 }
 
 async function ghStatus() {
-  const r = await api('POST', '/api/github/status', ghBody()).catch(err => { showGhOut('gh-status-out', err.message, true); return null; });
-  if (r) showGhOut('gh-status-out', r.ok ? `Branch: ${r.branch}\n\n${r.status || '(clean)'}\n\n${r.log}` : r.error, !r.ok);
+  return window.clsClawGitHubView.ghStatus(getGitHubViewCtx());
 }
 
 async function ghPush() {
-  const message = document.getElementById('gh-commit-msg').value.trim();
-  const branch = document.getElementById('gh-push-branch').value.trim();
-  if (!message) { toast('Commit message required', 'err'); return; }
-
-  const r = await api('POST', '/api/github/push', { ...ghBody(), message, branch }).catch(err => { showGhOut('gh-push-out', err.message, true); return null; });
-  if (r) showGhOut('gh-push-out', r.ok ? `✓ ${r.commit}\n${r.push}` : r.error, !r.ok);
+  return window.clsClawGitHubView.ghPush(getGitHubViewCtx());
 }
 
 async function ghCreatePR() {
-  const owner = document.getElementById('gh-owner').value.trim();
-  const repo = document.getElementById('gh-repo').value.trim();
-  const title = document.getElementById('gh-pr-title').value.trim();
-  const body = document.getElementById('gh-pr-body').value.trim();
-  const head = document.getElementById('gh-pr-head').value.trim();
-  if (!owner || !repo || !title) { toast('Owner, repo, title required', 'err'); return; }
-  const r = await api('POST', '/api/github/pr/create', { ...ghBody(), owner, repo, title, body, head }).catch(err => { showGhOut('gh-pr-out', err.message, true); return null; });
-  if (r?.html_url) { showGhOut('gh-pr-out', `✓ PR created: ${r.html_url}`); toast('✓ PR created!', 'ok'); }
-  else if (r) showGhOut('gh-pr-out', r.message || JSON.stringify(r), true);
+  return window.clsClawGitHubView.ghCreatePR(getGitHubViewCtx());
 }
 
 async function ghListPRs() {
-  const owner = document.getElementById('gh-owner').value.trim();
-  const repo = document.getElementById('gh-repo').value.trim();
-  if (!owner || !repo) { toast('Owner and repo required', 'err'); return; }
-  const prs = await api('POST', '/api/github/pr/list', { ...ghBody(), owner, repo }).catch(err => { toast(err.message, 'err'); return []; });
-  const el = document.getElementById('gh-prs');
-  if (!prs.length) { el.innerHTML = '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);padding:8px 0">No open PRs</div>'; return; }
-  el.innerHTML = prs.map(p =>
-    `<div class="pr-item" onclick="reviewPR(${p.number},'${esc(p.title)}','${owner}','${repo}')">
-      <div class="pr-title">#${p.number} ${esc(p.title)}</div>
-      <div class="pr-meta">by ${p.user?.login} · ${p.changed_files||'?'} files · click to AI review</div>
-      <div class="pr-meta" style="margin-top:4px">
-        <button class="gh-btn" onclick="event.stopPropagation(); document.getElementById('gh-pr-number').value='${p.number}'; ghInspectPR();">inspect</button>
-      </div>
-    </div>`
-  ).join('');
+  return window.clsClawGitHubView.ghListPRs(getGitHubViewCtx());
 }
 
 async function reviewPR(number, title, owner, repo) {
@@ -3787,97 +3672,45 @@ async function ghLoadPRThreads() {
 }
 
 async function loadGitHubWebhooks() {
-  await loadTunnelStatus();
-  const events = await api('GET', '/api/github/webhooks/recent?limit=12').catch((err) => {
-    showGhOut('gh-webhooks-out', err.message, true);
-    return null;
-  });
-  if (!events) return;
-  if (!events.length) {
-    showGhOut('gh-webhooks-out', 'No webhook deliveries yet.');
-    return;
-  }
-  const html = events.map((event) => `
-    <div style="padding:8px 0;border-bottom:1px dashed var(--border)">
-      <div style="font-size:10px;font-family:var(--mono);color:var(--accent2)">${esc(event.event || 'event')} · ${esc(event.action || 'received')} · ${timeAgo(event.receivedAt)}</div>
-      <div style="font-size:11px;color:var(--text);margin-top:4px">${esc(event.summary || 'GitHub webhook')}</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
-        ${event.repository ? `<span class="review-anchor exact">${esc(event.repository)}</span>` : ''}
-        ${event.sender ? `<span class="review-anchor exact">${esc(event.sender)}</span>` : ''}
-      </div>
-      ${event.artifactId ? `<div style="margin-top:8px"><button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="openArtifact('${event.artifactId}')">open artifact</button></div>` : ''}
-    </div>
-  `).join('');
-  showGhOut('gh-webhooks-out', html, false, true);
+  const result = await window.clsClawGitHubView.loadGitHubWebhooks(getGitHubViewCtx());
+  await loadHomeWorkspaceSignals();
+  return result;
 }
 
 async function loadTunnelStatus() {
-  const host = document.getElementById('gh-tunnel-host');
-  if (!host) return;
-  const status = await api('GET', '/api/tunnel/status').catch(() => null);
-  if (!status) {
-    host.innerHTML = '';
-    return;
-  }
-  const installed = (status.availableProviders || []).map((item) => `${item.id}:${item.installed ? 'yes' : 'no'}`).join(' · ');
-  host.innerHTML = `
-    <div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg2)">
-      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
-        <div>
-          <div style="font-size:12px;font-weight:700">Inbound tunnel</div>
-          <div style="font-size:11px;color:var(--muted)">${esc(status.status || 'idle')} · provider ${esc(status.provider || 'cloudflared')} · installed ${esc(installed || 'none')}</div>
-          ${status.publicUrl ? `<div style="font-size:11px;font-family:var(--mono);color:var(--accent2);margin-top:6px">${esc(status.publicUrl)}</div>` : ''}
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="configureTunnel()">configure</button>
-          <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="startTunnel()">start</button>
-          <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="stopTunnel()">stop</button>
-        </div>
-      </div>
-    </div>
-  `;
+  const result = await window.clsClawGitHubView.loadTunnelStatus(getGitHubViewCtx());
+  await loadHomeWorkspaceSignals();
+  return result;
 }
 
 async function configureTunnel() {
-  const provider = prompt('Tunnel provider: cloudflared or ngrok', 'cloudflared');
-  if (provider === null) return;
-  const result = await api('POST', '/api/tunnel', { action: 'configure', provider, port: 3737 }).catch((err) => {
-    toast(err.message, 'err');
-    return null;
-  });
-  if (!result) return;
-  toast('✓ Tunnel settings saved', 'ok');
-  loadTunnelStatus();
+  const result = await window.clsClawGitHubView.configureTunnel(getGitHubViewCtx());
+  await loadHomeWorkspaceSignals();
+  return result;
 }
 
 async function startTunnel() {
-  const status = await api('GET', '/api/tunnel/status').catch(() => ({ provider: 'cloudflared' }));
-  const result = await api('POST', '/api/tunnel', { provider: status.provider || 'cloudflared', port: 3737 }).catch((err) => {
-    toast(err.message, 'err');
-    return null;
-  });
-  if (!result) return;
-  toast('✓ Tunnel start requested', 'ok');
-  setTimeout(loadTunnelStatus, 600);
+  const result = await window.clsClawGitHubView.startTunnel(getGitHubViewCtx());
+  await loadHomeWorkspaceSignals();
+  return result;
 }
 
 async function stopTunnel() {
-  await api('DELETE', '/api/tunnel').catch((err) => {
-    toast(err.message, 'err');
-    return null;
-  });
-  toast('✓ Tunnel stopped', 'ok');
-  loadTunnelStatus();
+  const result = await window.clsClawGitHubView.stopTunnel(getGitHubViewCtx());
+  await loadHomeWorkspaceSignals();
+  return result;
 }
 
 async function copyGitHubWebhookUrl() {
-  const webhookUrl = `${location.origin}/api/github/webhook`;
-  try {
-    await navigator.clipboard.writeText(webhookUrl);
-    toast('✓ Webhook URL copied', 'ok');
-  } catch {
-    prompt('Copy GitHub webhook URL', webhookUrl);
-  }
+  return window.clsClawGitHubView.copyGitHubWebhookUrl(getGitHubViewCtx());
+}
+
+async function copyTunnelPublicUrl() {
+  return window.clsClawGitHubView.copyTunnelPublicUrl(getGitHubViewCtx());
+}
+
+async function copyPublicGitHubWebhookUrl() {
+  return window.clsClawGitHubView.copyPublicGitHubWebhookUrl(getGitHubViewCtx());
 }
 
 async function ghCompare() {
@@ -4130,8 +3963,29 @@ function getPromptPlaceholder(mode = chatMode) {
 }
 
 function renderDiscoverabilityPanels() {
+  const homeHost = document.getElementById('home-shell-host');
+  const onboardingHost = document.getElementById('onboarding-host');
   const welcomeHost = document.getElementById('discoverability-welcome');
   const composerHost = document.getElementById('composer-guide-host');
+  if (homeHost && window.clsClawModules?.renderHomeShell) {
+    homeHost.innerHTML = window.clsClawModules.renderHomeShell({
+      missionState,
+      executionProfile,
+      chatMode,
+      projectRoot,
+      authState,
+      providerStatus,
+      workspaceSignals: homeWorkspaceSignals,
+    });
+  }
+  if (onboardingHost && window.clsClawModules?.renderOnboardingPanel) {
+    onboardingHost.innerHTML = window.clsClawModules.renderOnboardingPanel({
+      projectRoot,
+      authState,
+      providerStatus,
+      dismissed: onboardingDismissed,
+    });
+  }
   if (welcomeHost && window.clsClawModules?.renderWelcomePanel) {
     welcomeHost.innerHTML = window.clsClawModules.renderWelcomePanel();
   }
@@ -4144,27 +3998,50 @@ function renderDiscoverabilityPanels() {
 }
 
 async function loadWorkspacePulse() {
-  const host = document.getElementById('workspace-pulse');
-  if (!host) return;
-  const health = await api('GET', '/api/health').catch(() => null);
-  if (!health || !window.clsClawModules?.renderWorkspacePulse) {
-    host.innerHTML = '';
-    return;
-  }
-  host.innerHTML = window.clsClawModules.renderWorkspacePulse(health);
+  return window.clsClawMissionControl.loadWorkspacePulse(getMissionControlCtx());
+}
+
+async function loadHomeWorkspaceSignals() {
+  const [registry, activity, targets, tunnel, companion, sessions] = await Promise.all([
+    api('GET', '/api/mcp/registry').catch(() => []),
+    api('GET', '/api/collab/activity?limit=8').catch(() => []),
+    api('GET', '/api/delegation/targets').catch(() => []),
+    api('GET', '/api/tunnel/status').catch(() => null),
+    api('GET', '/api/companion/summary').catch(() => null),
+    authState.user?.role === 'admin' ? api('GET', '/api/auth/sessions').catch(() => []) : Promise.resolve([]),
+  ]);
+  const entries = Array.isArray(registry) ? registry : [];
+  const events = Array.isArray(activity) ? activity : [];
+  const delegationTargets = Array.isArray(targets) ? targets : [];
+  const sessionList = Array.isArray(sessions) ? sessions : [];
+  const categories = new Set(entries.map((entry) => entry.metadata?.category || entry.kind || 'general'));
+  const activeActors = new Set(events.map((item) => item.actor?.username || item.actor?.displayName || '').filter(Boolean));
+  homeWorkspaceSignals = {
+    ecosystem: {
+      total: entries.length,
+      ready: entries.filter((entry) => ['ready', 'configured', 'installed', 'available'].includes(entry.health?.status || entry.status)).length,
+      custom: entries.filter((entry) => entry.source === 'custom').length,
+      needsAuth: entries.filter((entry) => entry.trust?.requiresAuth).length,
+      categories: categories.size,
+    },
+    collaboration: {
+      recentCount: events.length,
+      activeActors: Math.max(activeActors.size, sessionList.filter((session) => session.presence === 'active').length),
+      latestKind: sessionList.length ? `${sessionList.filter((session) => session.presence === 'active').length} live sessions` : (events[0]?.kind || ''),
+      pendingApprovals: companion?.pendingApprovals ?? 0,
+    },
+    remote: {
+      targets: delegationTargets.length,
+      enabledTargets: delegationTargets.filter((target) => target.enabled).length,
+      publicUrl: tunnel?.publicUrl || '',
+      tunnelStatus: tunnel?.status || 'idle',
+    },
+  };
+  renderDiscoverabilityPanels();
 }
 
 function applyQuickTemplate(templateId) {
-  const template = window.clsClawModules?.workflowTemplates?.[templateId];
-  if (!template) return;
-  setView('chat');
-  setChatMode(template.mode || chatMode);
-  setExecutionProfile(template.profile || executionProfile);
-  const prompt = document.getElementById('prompt');
-  if (!prompt) return;
-  prompt.value = template.text || '';
-  prompt.focus();
-  autoResize(prompt);
+  return window.clsClawMissionControl.applyQuickTemplate(getMissionControlCtx(), templateId);
 }
 
 function insertReferenceTemplate(referenceId) {
@@ -4179,8 +4056,26 @@ function insertReferenceTemplate(referenceId) {
   autoResize(prompt);
 }
 
+function seedFollowupPrompt(text, modeOverride = null, profileOverride = null) {
+  setView('chat');
+  if (modeOverride) setChatMode(modeOverride);
+  if (profileOverride) setExecutionProfile(profileOverride);
+  const prompt = document.getElementById('prompt');
+  if (!prompt) return;
+  prompt.value = String(text || '').trim();
+  prompt.focus();
+  autoResize(prompt);
+}
+
+function dismissOnboarding() {
+  onboardingDismissed = true;
+  localStorage.setItem('cx4_onboarding_dismissed', '1');
+  renderDiscoverabilityPanels();
+}
+
 function setChatMode(mode, persist = true) {
   chatMode = mode === 'build' ? 'build' : 'ask';
+  window.clsClawStateStore?.set('chatMode', chatMode);
   if (persist) localStorage.setItem('cx4_chat_mode', chatMode);
   document.getElementById('mode-ask')?.classList.toggle('active', chatMode === 'ask');
   document.getElementById('mode-build')?.classList.toggle('active', chatMode === 'build');
@@ -4191,6 +4086,7 @@ function setChatMode(mode, persist = true) {
 
 function setExecutionProfile(profile, persist = true) {
   executionProfile = ['quick', 'deliberate', 'execute', 'parallel'].includes(profile) ? profile : 'deliberate';
+  window.clsClawStateStore?.set('executionProfile', executionProfile);
   if (persist) localStorage.setItem('cx4_execution_profile', executionProfile);
   for (const key of ['quick', 'deliberate', 'execute', 'parallel']) {
     document.getElementById(`profile-${key}`)?.classList.toggle('active', executionProfile === key);
@@ -5020,6 +4916,10 @@ function renderAgentReply(text, existingWrap = null, options = {}) {
   if (shouldRenderCloseoutPanel(text, transparency, { mode, sources, visualEvidence })) {
     wrap.appendChild(makeCloseoutPanel(text, transparency, { mode, sources, visualEvidence }));
   }
+  const suggestedActions = makeSuggestedActionsPanel(text, transparency, { mode, sources, visualEvidence });
+  if (suggestedActions) {
+    wrap.appendChild(suggestedActions);
+  }
   const evidenceDeck = makeEvidenceDeckPanel(transparency?.evidenceBundle || null, { sources, visualEvidence });
   if (evidenceDeck) {
     wrap.appendChild(evidenceDeck);
@@ -5334,6 +5234,70 @@ function makeCloseoutPanel(text, transparency, options = {}) {
   return panel;
 }
 
+function buildSuggestedActionItems(text, transparency, options = {}) {
+  const actions = [];
+  const artifactId = transparency?.final?.artifactId || null;
+  const approvalBlocked = transparency?.governor?.phaseDirective === 'await_approval' || Boolean(transparency?.governor?.shouldPauseForApproval);
+  if (approvalBlocked || options.mode === 'build') {
+    actions.push({
+      label: 'review queue',
+      action: "setView('changes')",
+    });
+  }
+  if (transparency?.deliberation?.needsVerification || options.mode === 'build') {
+    actions.push({
+      label: 'verify latest work',
+      action: "seedFollowupPrompt('/verify Verify the latest changes, summarize what is confirmed, and call out anything still unverified.', 'ask', 'deliberate')",
+    });
+  }
+  if ((options.visualEvidence || []).length) {
+    actions.push({
+      label: 'debug with screenshot',
+      action: "seedFollowupPrompt('/debug-ui Use the existing screenshot evidence plus relevant files to propose the next fix and verification step.', 'build', 'parallel')",
+    });
+  }
+  if ((options.sources || []).length) {
+    actions.push({
+      label: 'brief the findings',
+      action: "seedFollowupPrompt('/brief Summarize the grounded findings, the current risk hotspots, and the best next action from this turn.', 'ask', 'quick')",
+    });
+  }
+  if (artifactId) {
+    actions.push({
+      label: 'open artifact',
+      action: `openArtifact('${escAttr(artifactId)}')`,
+    });
+    actions.push({
+      label: 'send to Slack',
+      action: `sendArtifactToSlack('${escAttr(artifactId)}')`,
+    });
+  }
+  const unique = [];
+  const seen = new Set();
+  for (const item of actions) {
+    const key = `${item.label}:${item.action}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(item);
+  }
+  return unique.slice(0, 5);
+}
+
+function makeSuggestedActionsPanel(text, transparency, options = {}) {
+  const actions = buildSuggestedActionItems(text, transparency, options);
+  if (!actions.length) return null;
+  const panel = document.createElement('div');
+  panel.className = 'next-actions-panel';
+  panel.innerHTML = `
+    <div class="next-actions-title">Suggested Next Actions</div>
+    <div class="next-actions-copy">Use one of these follow-ups to keep the current thread moving without retyping the whole setup.</div>
+    <div class="next-actions-row">
+      ${actions.map((item) => `<button class="next-action-btn" onclick="${item.action}">${esc(item.label)}</button>`).join('')}
+    </div>
+  `;
+  return panel;
+}
+
 function summarizeCloseoutChanged(text, mode) {
   const source = String(text || '');
   if (/```patch/i.test(source) || /\*\*\* Begin Patch/.test(source)) return 'Patch-level changes or proposals were prepared.';
@@ -5586,8 +5550,10 @@ async function showHealth() {
     row('Project root',    shortPath(h.projectRoot), null),
 
     section('Sandbox'),
-    row('Mode',            h.sandbox.mode, h.sandbox.mode === 'docker'),
+    row('Mode',            h.sandbox.mode, h.sandbox.mode === 'docker' || h.sandbox.mode === 'gvisor' || h.sandbox.mode === 'microvm'),
     row('Docker',          h.sandbox.docker ? 'available' : 'not available', h.sandbox.docker),
+    row('gVisor',          h.sandbox.gvisor ? 'available' : 'not available', h.sandbox.gvisor),
+    row('MicroVM',         h.sandbox.microvm ? 'available' : 'not available', h.sandbox.microvm),
     row('Git',             h.git.available ? 'available' : 'not available', h.git.available),
 
     section('Context engine'),
@@ -6170,53 +6136,11 @@ async function loadProviderConfig() {
 }
 
 async function openSettings() {
-  document.getElementById('cfg-root').value = projectRoot;
-  await loadAuthUsers();
-  document.getElementById('modal-settings').style.display = 'flex';
+  return window.clsClawSettingsView.openSettings(getSettingsViewCtx());
 }
 
 async function saveSettings() {
-  const root = document.getElementById('cfg-root').value.trim();
-  const githubToken = document.getElementById('gh-tok').value.trim();
-  const anthropicKey = document.getElementById('cfg-anthropic').value.trim();
-  const openaiKey = document.getElementById('cfg-openai').value.trim();
-  const ollamaUrl = document.getElementById('cfg-ollama-url').value.trim();
-  const ollamaModel = document.getElementById('cfg-ollama-model').value.trim();
-  const ollamaEmbeddingModel = document.getElementById('cfg-ollama-embedding-model').value.trim();
-  const embeddingProvider = document.getElementById('cfg-embedding-provider').value;
-  const slackWebhookUrl = document.getElementById('cfg-slack-webhook').value.trim();
-  const githubWebhookSecret = document.getElementById('cfg-github-webhook-secret').value.trim();
-  const sandboxProvider = document.getElementById('cfg-sandbox-provider').value;
-
-  const payload = {
-    root,
-    token: githubToken,
-    ollamaUrl,
-    ollamaModel,
-    ollamaEmbeddingModel,
-    embeddingProvider,
-    sandboxProvider,
-  };
-  if (!isMaskedSecret(anthropicKey)) payload.anthropicKey = anthropicKey;
-  if (!isMaskedSecret(openaiKey)) payload.openaiKey = openaiKey;
-  if (!isMaskedSecret(slackWebhookUrl)) payload.slackWebhookUrl = slackWebhookUrl;
-  if (!isMaskedSecret(githubWebhookSecret)) payload.githubWebhookSecret = githubWebhookSecret;
-
-  const r = await api('POST', '/api/config', payload).catch(err => { toast(err.message, 'err'); return null; });
-  if (r?.ok) {
-    projectRoot = root || projectRoot;
-    currentBrowseDir = projectRoot;
-    ghToken = githubToken;
-    if (ghToken) localStorage.setItem('cx4_gh', ghToken);
-    else localStorage.removeItem('cx4_gh');
-    document.getElementById('cwd-disp').textContent = shortPath(projectRoot);
-    applyProviderState(r.providers || null);
-    await loadFiles();
-  }
-  closeModal('modal-settings');
-  toast('✓ Settings saved', 'ok');
-  updateApiKeyWarning();
-  await refreshHealthPill();
+  return window.clsClawSettingsView.saveSettings(getSettingsViewCtx());
 }
 
 function termLog(msg, type = '') {
@@ -6288,8 +6212,8 @@ async function refreshHealthPill() {
   }
 }
 
-function openModal(id) { document.getElementById(id).style.display = 'flex'; }
-function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+function openModal(id) { return window.clsClawDomUtils.openModal(id); }
+function closeModal(id) { return window.clsClawDomUtils.closeModal(id); }
 function isHiddenAlliedShortcut(event) {
   const isMacPlatform = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '');
   const key = String(event.key || '').toLowerCase();
@@ -6309,19 +6233,13 @@ function handleHiddenAlliedShortcut(event) {
   event.preventDefault();
   openModal('modal-allied');
 }
-function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function shortPath(p) { if (!p) return ''; const parts = String(p).split('/'); return parts.length > 3 ? '…/' + parts.slice(-2).join('/') : p; }
+function esc(s) { return window.clsClawDomUtils.esc(s); }
+function shortPath(p) { return window.clsClawDomUtils.shortPath(p); }
 function scrollBottom() { setTimeout(() => { const c = document.getElementById('chat-msgs'); c.scrollTop = c.scrollHeight; }, 60); }
-function timeAgo(ts) { const s = Math.round((Date.now()-ts)/1000); if (s<60) return s+'s ago'; if (s<3600) return Math.floor(s/60)+'m ago'; return Math.floor(s/3600)+'h ago'; }
-function timeDiff(start, end) { const s = Math.round(((end||Date.now())-start)/1000); return s<60?s+'s':Math.floor(s/60)+'m'+s%60+'s'; }
+function timeAgo(ts) { return window.clsClawDomUtils.timeAgo(ts); }
+function timeDiff(start, end) { return window.clsClawDomUtils.timeDiff(start, end); }
 
-function toast(msg, type = '') {
-  const el = document.createElement('div');
-  el.className = 'toast' + (type ? ' ' + type : '');
-  el.textContent = msg;
-  document.getElementById('toasts').appendChild(el);
-  setTimeout(() => el.remove(), 3500);
-}
+function toast(msg, type = '') { return window.clsClawDomUtils.toast(msg, type); }
 
 function updateBadge(id, n) {
   const el = document.getElementById(id);

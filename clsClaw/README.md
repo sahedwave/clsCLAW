@@ -46,6 +46,7 @@ node --test
 ### Sandbox layer (`src/sandbox/sandbox.js`)
 - **Docker mode** (if Docker is running): each command runs in `node:20-alpine` with `--network=none --memory=512m --cap-drop=ALL`. Full filesystem isolation.
 - **Restricted mode** (no Docker): `child_process` with blocked command list, path whitelist enforcement, sanitized env.
+- **MicroVM runner mode**: `clsclaw-microvm-run` is bundled in `bin/` and can route execution through Lima, Multipass, or a hardened macOS `sandbox-exec` backend depending on what is installed locally.
 - All file writes are path-checked against project root before touching disk.
 
 ### Approval workflow (`src/diff/approvalQueue.js`)
@@ -118,6 +119,20 @@ node --test
 - Built-in remote delegation registry can store signed remote clsClaw targets and dispatch tasks to `/api/delegation/execute`.
 - These features work in the app, but still depend on installed tunnel binaries or reachable remote clsClaw instances.
 
+### Bundled microVM runner (`bin/clsclaw-microvm-run`)
+- `clsclaw-microvm-run --version`
+- `clsclaw-microvm-run --capabilities`
+- `clsclaw-microvm-run --self-test`
+- Uses the strongest available backend in this order:
+  - Lima when `CLSCLAW_MICROVM_LIMA_INSTANCE` is configured
+  - Multipass when `CLSCLAW_MICROVM_MULTIPASS_INSTANCE` is configured
+  - macOS `sandbox-exec` as a hardened local fallback
+- Optional overrides:
+  - `CLSCLAW_MICROVM_RUNNER`
+  - `CLSCLAW_MICROVM_BACKEND`
+  - `CLSCLAW_MICROVM_LIMA_INSTANCE`
+  - `CLSCLAW_MICROVM_MULTIPASS_INSTANCE`
+
 ### Live updates (`src/sse.js`)
 - Server-Sent Events replace WebSocket — no `ws` package needed.
 - All agent events, diff proposals, permission requests stream to the UI in real time.
@@ -128,7 +143,7 @@ node --test
 
 | Feature | Reason |
 |---------|--------|
-| True VM sandbox | clsClaw supports restricted, Docker, and optional gVisor-style container isolation; true microVM isolation still requires an external runtime stack |
+| Stronger VM-grade backend than `sandbox-exec` | clsClaw now ships the runner and provider path, but Lima/Multipass-style execution still depends on those runtimes being installed and configured locally |
 | Direct internet webhook delivery | clsClaw can manage a local tunnel when `cloudflared` or `ngrok` is installed, but inbound internet delivery still depends on that external tunnel/provider |
 | Full multi-user collaboration UX | Local users, attribution, and admin controls exist, but the app is still not a full concurrent shared workspace with presence/conflict UX |
 | Cloud task delegation | clsClaw supports signed remote delegation to other reachable clsClaw instances, but actual cloud execution still requires remote infrastructure |

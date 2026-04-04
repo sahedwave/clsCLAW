@@ -66,6 +66,21 @@ test('assessCommand prefers gvisor when runsc and docker are available', async (
   }
 });
 
+test('assessCommand can prefer microvm when the runner is available', async () => {
+  sandbox.__setDockerAvailabilityForTests(false);
+  sandbox.__setMicrovmAvailabilityForTests(true);
+  const workspace = makeWorkspace();
+
+  try {
+    const assessment = await sandbox.assessCommand('ls', workspace, { providerPreference: 'microvm' });
+    assert.equal(assessment.sandboxMode, 'microvm');
+  } finally {
+    cleanup(workspace);
+    sandbox.__setDockerAvailabilityForTests(null);
+    sandbox.__setMicrovmAvailabilityForTests(null);
+  }
+});
+
 test('runCommandApproved executes explicitly approved host commands in host mode', async () => {
   sandbox.__setDockerAvailabilityForTests(true);
   const workspace = makeWorkspace();

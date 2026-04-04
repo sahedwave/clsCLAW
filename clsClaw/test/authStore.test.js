@@ -56,3 +56,25 @@ test('auth store can disable users and revoke their sessions', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('auth store tracks session labels, device hints, and revoke-by-id', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clsclaw-auth-'));
+  try {
+    const store = new AuthStore(dir);
+    const admin = store.bootstrap({ username: 'admin', password: 'supersecret' });
+    const session = store.createSession(admin.id, {
+      label: 'Lab MacBook',
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit Safari/605.1.15',
+    });
+    const listed = store.listSessions();
+    assert.equal(listed[0].label, 'Lab MacBook');
+    assert.match(listed[0].device, /macOS/i);
+    const updated = store.updateSession(session.session.id, { label: 'Main Desk' });
+    assert.equal(updated.label, 'Main Desk');
+    const revoked = store.revokeSessionById(session.session.id);
+    assert.equal(revoked.revoked, 1);
+    assert.equal(store.listSessions().length, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

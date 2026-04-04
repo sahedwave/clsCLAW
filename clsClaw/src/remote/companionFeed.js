@@ -42,7 +42,8 @@ function buildNotificationItems(notifications = []) {
       : item.artifactId
         ? { type: 'artifact', id: item.artifactId }
         : null,
-    tags: [item.heartbeatKind || 'heartbeat', item.status || 'success'].filter(Boolean),
+    actor: item.createdBy || null,
+    tags: [item.heartbeatKind || 'heartbeat', item.status || 'success', actorLabel(item.createdBy)].filter(Boolean),
   }));
 }
 
@@ -55,7 +56,8 @@ function buildArtifactItems(artifacts = []) {
     createdAt: artifact.createdAt || Date.now(),
     priority: artifact.type === 'automation-error' ? 'high' : 'normal',
     action: { type: 'artifact', id: artifact.id },
-    tags: [artifact.type || 'artifact'].filter(Boolean),
+    actor: artifact.createdBy || null,
+    tags: [artifact.type || 'artifact', actorLabel(artifact.createdBy)].filter(Boolean),
   }));
 }
 
@@ -70,7 +72,8 @@ function buildApprovalItems(pendingChanges = []) {
     createdAt: change.proposedAt || Date.now(),
     priority: change.status === 'conflict' ? 'high' : 'normal',
     action: { type: 'approval', id: change.id },
-    tags: [change.type || 'change', change.status || 'pending'].filter(Boolean),
+    actor: change.proposedBy || change.resolvedBy || null,
+    tags: [change.type || 'change', change.status || 'pending', actorLabel(change.proposedBy || change.resolvedBy)].filter(Boolean),
   }));
 }
 
@@ -87,7 +90,8 @@ function buildTurnItems(recentTurns = []) {
     createdAt: turn.updatedAt || turn.createdAt || Date.now(),
     priority: turn.governor?.shouldPauseForApproval ? 'high' : 'normal',
     action: turn.final?.artifactId ? { type: 'artifact', id: turn.final.artifactId } : null,
-    tags: [turn.meta?.intent || 'turn', turn.meta?.profile || 'deliberate'].filter(Boolean),
+    actor: turn.meta?.actor || null,
+    tags: [turn.meta?.intent || 'turn', turn.meta?.profile || 'deliberate', actorLabel(turn.meta?.actor)].filter(Boolean),
   }));
 }
 
@@ -102,6 +106,11 @@ function buildJobItems(jobs = []) {
     action: { type: 'job', id: job.id },
     tags: [job.type || 'job', job.heartbeatKind || 'automation'].filter(Boolean),
   }));
+}
+
+function actorLabel(actor) {
+  if (!actor || typeof actor !== 'object') return '';
+  return actor.displayName || actor.username || '';
 }
 
 function trimText(text = '', max = 72) {

@@ -432,6 +432,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
       authenticated: Boolean(auth),
       bootstrapRequired: !authStore.isConfigured(),
       user: auth?.user || null,
+      session: auth?.session || null,
     });
   }
   if (is('/api/auth/bootstrap', 'POST')) {
@@ -442,13 +443,14 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
         displayName: body.displayName,
         role: 'admin',
       });
-      const session = authStore.createSession(user.id);
+      const session = authStore.createSession(user.id, inferSessionContext(req, body));
       setCookie(res, 'clsclaw_session', session.token);
       return json(res, 200, {
         ok: true,
         configured: true,
         authenticated: true,
         user: session.user,
+        session: session.session,
       });
     } catch (err) {
       return json(res, 400, { error: err.message });
@@ -457,9 +459,9 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
   if (is('/api/auth/login', 'POST')) {
     const user = authStore.authenticate(body.username, body.password);
     if (!user) return json(res, 401, { error: 'Invalid username or password' });
-    const session = authStore.createSession(user.id);
+    const session = authStore.createSession(user.id, inferSessionContext(req, body));
     setCookie(res, 'clsclaw_session', session.token);
-    return json(res, 200, { ok: true, authenticated: true, user: session.user });
+    return json(res, 200, { ok: true, authenticated: true, user: session.user, session: session.session });
   }
   if (is('/api/auth/logout', 'POST')) {
     const cookies = parseCookies(req);
@@ -497,7 +499,27 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
   }
   if (is('/api/auth/sessions', 'GET')) {
     if (auth?.user?.role !== 'admin') return json(res, 403, { error: 'Admin access required' });
-    return json(res, 200, authStore.listSessions());
+    return json(res, 200, authStore.listSessions().map((session) => ({
+      ...session,
+      current: session.id === auth?.session?.id,
+    })));
+  }
+  const authSessionM = pathname.match(/^\/api\/auth\/sessions\/([^/]+)$/);
+  if (authSessionM) {
+    if (auth?.user?.role !== 'admin') return json(res, 403, { error: 'Admin access required' });
+    if (method === 'PATCH') {
+      try {
+        const session = authStore.updateSession(authSessionM[1], body || {});
+        return session ? json(res, 200, { ok: true, session }) : json(res, 404, { error: 'Session not found' });
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+    if (method === 'DELETE') {
+      const result = authStore.revokeSessionById(authSessionM[1]);
+      if (auth?.session?.id === authSessionM[1]) clearCookie(res, 'clsclaw_session');
+      return json(res, 200, result);
+    }
   }
 
   if (is('/api/config', 'GET')) {
@@ -669,8 +691,6 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
       gitOk = true;
     } catch {}
 
-    const dockerOk = sbInfo.mode === 'docker';
-
     const health = {
       version:    '4.0.0',
       status:     'ok',
@@ -678,8 +698,9 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
       projectRoot,
       sandbox: {
         mode:          sbInfo.mode,
-        docker:        dockerOk,
+        docker:        Boolean(sbInfo.availableProviders?.docker),
         gvisor:        Boolean(sbInfo.availableProviders?.gvisor),
+        microvm:       Boolean(sbInfo.availableProviders?.microvm),
         preferredProvider: sbInfo.preferredProvider || providerConfig.sandboxProvider || 'auto',
         allowedCmds:   sbInfo.allowedCommands?.length || 0,
       },
@@ -1876,6 +1897,14 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
       return json(res, result.ok ? 200 : 404, result);
     }
   }
+  const delegationTargetPingM = pathname.match(/^\/api\/delegation\/targets\/([^/]+)\/ping$/);
+  if (delegationTargetPingM && method === 'POST') {
+    try {
+      return json(res, 200, await delegationRegistry.pingTarget(delegationTargetPingM[1]));
+    } catch (err) {
+      return json(res, 400, { error: err.message });
+    }
+  }
   if (is('/api/delegation/dispatches', 'GET')) {
     return json(res, 200, delegationRegistry.listDispatches(Number(q.limit) || 20));
   }
@@ -2160,6 +2189,16 @@ function parseCookies(req) {
       acc[decodeURIComponent(pair.slice(0, index))] = decodeURIComponent(pair.slice(index + 1));
       return acc;
     }, {});
+}
+
+function inferSessionContext(req, body = {}) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return {
+    label: body.sessionLabel || body.label || '',
+    device: body.sessionDevice || body.device || '',
+    userAgent: req.headers['user-agent'] || '',
+    ip: forwarded || req.socket?.remoteAddress || '',
+  };
 }
 
 function setCookie(res, name, value, { maxAge = 60 * 60 * 24 * 14 } = {}) {

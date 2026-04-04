@@ -53,6 +53,14 @@
       profile: 'quick',
       text: '/brief Give me a concise project briefing with current risk hotspots, recent progress, and the highest-value next action.',
     },
+    swarm: {
+      label: '/swarm',
+      title: 'Parallel specialist plan',
+      detail: 'Break a larger task into bounded specialists and merge their outputs safely.',
+      mode: 'build',
+      profile: 'parallel',
+      text: '/swarm Break this task into a bounded swarm plan, explain the specialist roles, then execute only if the plan looks safe and coherent.',
+    },
   };
 
   const referenceTemplates = {
@@ -71,7 +79,173 @@
       detail: 'Pull a saved report, briefing, or turn artifact into the task.',
       text: '@artifact artifact-id ',
     },
+    turn: {
+      label: '@turn',
+      detail: 'Point at a recent turn, trace, or closeout for follow-up work.',
+      text: '@turn turn-id ',
+    },
   };
+
+  function renderOnboardingPanel({
+    projectRoot = '',
+    authState = {},
+    providerStatus = {},
+    dismissed = false,
+  } = {}) {
+    if (dismissed) return '';
+    const steps = [
+      {
+        label: 'Authenticate',
+        done: !!authState.authenticated,
+        detail: authState.authenticated
+          ? `Signed in as ${authState.user?.displayName || authState.user?.username || 'user'}.`
+          : 'Create the first local admin account or sign in to unlock the workspace.',
+        action: authState.authenticated ? '' : 'openAuthModal(true)',
+        cta: authState.authenticated ? '' : 'sign in',
+      },
+      {
+        label: 'Pick workspace',
+        done: !!projectRoot,
+        detail: projectRoot ? `Current root: ${shortPath(projectRoot)}` : 'Choose the project folder this workspace should operate on.',
+        action: projectRoot ? '' : 'openSettings()',
+        cta: projectRoot ? '' : 'set root',
+      },
+      {
+        label: 'Configure provider',
+        done: !!providerStatus.llmConfigured,
+        detail: providerStatus.llmConfigured
+          ? 'A model provider is ready for chat, planning, and agents.'
+          : 'Add Anthropic, OpenAI, or Ollama so clsClaw can reason and execute.',
+        action: providerStatus.llmConfigured ? '' : 'openSettings()',
+        cta: providerStatus.llmConfigured ? '' : 'add provider',
+      },
+      {
+        label: 'Try a workflow',
+        done: false,
+        detail: 'Start with /review, /fix, /verify, or /debug-ui to learn the app through real work.',
+        action: "applyQuickTemplate('review')",
+        cta: 'start',
+      },
+    ];
+    const completed = steps.filter((step) => step.done).length;
+    return `
+      <div class="discover-panel" style="max-width:920px">
+        <div class="discover-heading">
+          <div>
+            <div class="discover-kicker">First Run</div>
+            <div class="discover-summary">Set up the essentials once, then let the workspace carry the rest.</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="discover-label">${completed}/${steps.length} ready</span>
+            <button class="mission-btn" onclick="dismissOnboarding()">dismiss</button>
+          </div>
+        </div>
+        <div class="hero-stats-grid">
+          ${steps.map((step) => `
+            <div class="hero-stat-card" style="border-color:${step.done ? 'rgba(52,211,153,0.22)' : 'var(--border)'}">
+              <div class="hero-stat-label">${esc(step.label)}</div>
+              <div class="hero-stat-value" style="display:flex;align-items:center;gap:8px">
+                <span>${step.done ? 'done' : 'next'}</span>
+              </div>
+              <div class="hero-stat-detail">${esc(step.detail)}</div>
+              ${step.action ? `<div style="margin-top:6px"><button class="hero-action" onclick="${step.action}">${esc(step.cta)}</button></div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderHomeShell({
+    missionState = {},
+    executionProfile = 'deliberate',
+    chatMode = 'ask',
+    projectRoot = '',
+    authState = {},
+    providerStatus = {},
+    workspaceSignals = {},
+  } = {}) {
+    const stats = [
+      {
+        label: 'Mode',
+        value: chatMode,
+        detail: chatMode === 'build' ? 'Editing, patching, and verification-first execution.' : 'Analysis, inspection, and grounded answers.',
+      },
+      {
+        label: 'Profile',
+        value: executionProfile,
+        detail: 'Execution pacing and autonomy budget for this workspace.',
+      },
+      {
+        label: 'Providers',
+        value: providerStatus.llmConfigured ? 'ready' : 'setup needed',
+        detail: providerStatus.llmConfigured ? 'At least one model provider is configured.' : 'Connect a model provider to unlock chat and agents.',
+      },
+      {
+        label: 'Workspace',
+        value: projectRoot ? shortPath(projectRoot) : 'not set',
+        detail: authState.authenticated ? `Signed in as ${authState.user?.displayName || authState.user?.username || 'user'}.` : 'Authenticate to unlock the local workspace.',
+      },
+    ];
+    const ecosystem = workspaceSignals.ecosystem || {};
+    const collaboration = workspaceSignals.collaboration || {};
+    const remote = workspaceSignals.remote || {};
+    if (ecosystem.total !== undefined) {
+      stats.push({
+        label: 'Ecosystem',
+        value: `${ecosystem.ready ?? 0}/${ecosystem.total} ready`,
+        detail: `${ecosystem.custom ?? 0} custom · ${ecosystem.categories ?? 0} categories · ${ecosystem.needsAuth ?? 0} auth-gated`,
+      });
+    }
+    if (collaboration.recentCount !== undefined) {
+      stats.push({
+        label: 'Collaboration',
+        value: `${collaboration.activeActors ?? 0} active`,
+        detail: `${collaboration.recentCount ?? 0} recent events · ${collaboration.latestKind || 'no recent activity'}`,
+      });
+    }
+    if (remote.targets !== undefined) {
+      stats.push({
+        label: 'Remote',
+        value: remote.publicUrl ? 'reachable' : (remote.tunnelStatus || 'idle'),
+        detail: `${remote.enabledTargets ?? 0}/${remote.targets ?? 0} delegation targets enabled · ${remote.publicUrl ? 'public URL ready' : 'local-only right now'}`,
+      });
+    }
+    const heroActions = [
+      { label: 'Review workspace', template: 'review' },
+      { label: 'Fix bug safely', template: 'fix' },
+      { label: 'Verify recent work', template: 'verify' },
+      { label: 'Debug a screenshot', template: 'debugUi' },
+    ];
+    return `
+      <div class="hero-shell">
+        <div class="hero-banner">
+          <div class="hero-copy">
+            <div class="hero-kicker">Local-first engineering cockpit</div>
+            <div class="hero-title">Inspect, act, review, and verify from one workspace.</div>
+            <div class="hero-text">${esc(missionState.summary || 'Evidence-backed work starts here. Use a quick action or describe the next task in plain language.')}</div>
+            <div class="hero-actions">
+              ${heroActions.map((item) => `<button class="hero-action" onclick="applyQuickTemplate('${item.template}')">${esc(item.label)}</button>`).join('')}
+            </div>
+          </div>
+          <div class="hero-focus-card">
+            <div class="hero-focus-label">Current focus</div>
+            <div class="hero-focus-value">${esc(missionState.phase || 'idle')}</div>
+            <div class="hero-focus-detail">${esc(missionState.nextAction || 'wait')} · ${esc(missionState.evidenceStatus || 'pending evidence')}</div>
+          </div>
+        </div>
+        <div class="hero-stats-grid">
+          ${stats.map((item) => `
+            <div class="hero-stat-card">
+              <div class="hero-stat-label">${esc(item.label)}</div>
+              <div class="hero-stat-value">${esc(item.value)}</div>
+              <div class="hero-stat-detail">${esc(item.detail)}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
 
   function renderMissionControlChips({ missionState = {}, executionProfile = 'deliberate' } = {}) {
     const profile = missionState.profile || executionProfile || 'deliberate';
@@ -98,6 +272,44 @@
     return chips.join('');
   }
 
+  function renderMissionControlPanel({ missionState = {}, executionProfile = 'deliberate' } = {}) {
+    const profile = missionState.profile || executionProfile || 'deliberate';
+    const phase = missionState.phase || 'idle';
+    const cards = [
+      {
+        label: 'Execution',
+        value: `${profile} · ${phase}`,
+        detail: missionState.subtext || 'No active turn',
+      },
+      {
+        label: 'Evidence',
+        value: missionState.evidenceStatus || 'pending',
+        detail: missionState.evidenceSummary || 'Evidence will appear here after inspection and tool use.',
+      },
+      {
+        label: 'Next',
+        value: missionState.nextAction || 'wait',
+        detail: missionState.approvalRequired ? 'Approval is blocking the next write step.' : 'No approval gate is blocking the current turn.',
+      },
+      {
+        label: 'Privacy',
+        value: missionState.privacySummary ? missionState.privacySummary.replace(/^privacy=/, '') : 'storage=local',
+        detail: missionState.turnId ? `tracking turn ${String(missionState.turnId).slice(0, 8)}` : 'No active turn yet.',
+      },
+    ];
+    return `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px">
+        ${cards.map((card) => `
+          <div style="border:1px solid var(--border);border-radius:14px;padding:12px 14px;background:linear-gradient(180deg,rgba(15,23,42,0.65),rgba(15,23,42,0.28))">
+            <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--hint)">${esc(card.label)}</div>
+            <div style="margin-top:6px;font-size:13px;font-weight:700;color:var(--text)">${esc(card.value)}</div>
+            <div style="margin-top:6px;font-size:11px;line-height:1.6;color:var(--muted)">${esc(card.detail).slice(0, 140)}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
   function renderArtifactMetadataRows(metadata = {}) {
     if (!metadata || typeof metadata !== 'object') return '';
     const rows = [];
@@ -117,6 +329,7 @@
     pushRow('Evidence', metadata.evidenceStatus);
     pushRow('Approval required', metadata.approvalRequired ? 'yes' : '');
     pushRow('Created by', metadata.createdBy);
+    pushRow('Updated by', metadata.updatedBy);
     pushRow('Project root', metadata.projectRoot ? shortPath(metadata.projectRoot) : '');
     return rows.length ? `
       <div style="margin-top:10px">
@@ -280,7 +493,10 @@
   window.clsClawModules = {
     workflowTemplates,
     referenceTemplates,
+    renderHomeShell,
+    renderOnboardingPanel,
     renderMissionControlChips,
+    renderMissionControlPanel,
     renderArtifactMetadataRows,
     renderArtifactParsedContent,
     renderWelcomePanel,

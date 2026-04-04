@@ -68,6 +68,11 @@ test('detectIntent respects slash workflow directives', () => {
     mode: 'ask',
     messages: [{ role: 'user', content: '/fix tighten auth handling' }],
   }), 'build');
+
+  assert.equal(detectIntent({
+    mode: 'ask',
+    messages: [{ role: 'user', content: '/swarm break this migration into specialist tasks' }],
+  }), 'plan');
 });
 
 test('intentToRole maps chat to analyze and build to code', () => {

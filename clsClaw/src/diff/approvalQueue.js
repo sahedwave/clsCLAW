@@ -154,6 +154,7 @@ class ApprovalQueue extends EventEmitter {
         inlineComments: reviewData.inlineComments,
         evidenceBundle,
         approvalContext,
+        proposedBy: actor,
       }),
       projectRoot,
       agentId:    'automation:' + jobId,
@@ -186,6 +187,8 @@ class ApprovalQueue extends EventEmitter {
       evidenceBundle: change.evidenceBundle,
       approvalContext: change.approvalContext,
       githubReview: change.githubReview,
+      proposedBy: change.proposedBy,
+      resolvedBy: change.resolvedBy,
     });
     change.updatedAt = Date.now();
     this.emit('updated', this._prepareChangeForRead(change));
@@ -321,6 +324,8 @@ class ApprovalQueue extends EventEmitter {
         evidenceBundle: change.evidenceBundle,
         approvalContext: change.approvalContext,
         githubReview: change.githubReview,
+        proposedBy: change.proposedBy,
+        resolvedBy: change.resolvedBy,
       }),
     };
   }

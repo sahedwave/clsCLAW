@@ -57,6 +57,7 @@ function detectIntent({ messages = [], mode = 'ask' } = {}) {
   if (directive === 'verify' || directive === 'test') return 'test';
   if (directive === 'debug-ui') return 'build';
   if (directive === 'brief') return 'plan';
+  if (directive === 'swarm') return 'plan';
 
   if (/\b(repository|repo|codebase|github|compare repos|compare repositories|surgical analysis|deep dive)\b/.test(text)) {
     return 'repo_analysis';

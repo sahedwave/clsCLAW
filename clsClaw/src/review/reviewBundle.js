@@ -9,6 +9,8 @@ function buildReviewBundle({
   evidenceBundle = null,
   approvalContext = null,
   githubReview = null,
+  proposedBy = null,
+  resolvedBy = null,
 } = {}) {
   const generalFindings = Array.isArray(result?.generalFindings) ? result.generalFindings : [];
   const findings = Array.isArray(result?.findings) ? result.findings : [];
@@ -70,6 +72,10 @@ function buildReviewBundle({
       evidenceStatus: approvalContext.evidenceStatus || null,
       verificationPlan: approvalContext.verificationPlan || '',
     } : null,
+    actors: {
+      proposedBy: sanitizeActor(proposedBy),
+      resolvedBy: sanitizeActor(resolvedBy),
+    },
     verificationNotes,
     auditTrail: buildAuditTrail({ approvalContext, githubReview, visualDebug, verificationNotes }),
     visualDebug,
@@ -81,6 +87,16 @@ function buildReviewBundle({
       visualDebug,
       topExternalSources,
     }),
+  };
+}
+
+function sanitizeActor(actor) {
+  if (!actor || typeof actor !== 'object') return null;
+  return {
+    id: actor.id || null,
+    username: actor.username || null,
+    displayName: actor.displayName || null,
+    role: actor.role || null,
   };
 }
 

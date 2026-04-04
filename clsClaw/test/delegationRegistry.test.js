@@ -61,3 +61,29 @@ test('delegation registry verifies inbound signed requests', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('delegation registry can ping a target and persist health metadata', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clsclaw-delegation-'));
+  try {
+    const registry = new DelegationRegistry({
+      dataFile: path.join(dir, 'delegation.json'),
+      fetchImpl: async (url) => ({
+        ok: /\/api\/health$/.test(url),
+        status: 200,
+        text: async () => '{}',
+      }),
+    });
+    const target = registry.createTarget({
+      name: 'Remote C',
+      url: 'https://remote.example.com',
+      sharedSecret: 'top-secret',
+    });
+    const result = await registry.pingTarget(target.id);
+    assert.equal(result.ok, true);
+    const listed = registry.listTargets();
+    assert.equal(listed[0].healthStatus, 'reachable');
+    assert.equal(Boolean(listed[0].lastPingAt), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -8,6 +8,10 @@ const fs = require('fs');
 const { promisify } = require('util');
 const { detectInstall } = require('./installGate');
 const { readRedLinePatterns } = require('../workspaceIdentity');
+const restrictedProvider = require('./providers/restricted');
+const dockerProvider = require('./providers/docker');
+const gvisorProvider = require('./providers/gvisor');
+const microvmProvider = require('./providers/microvm');
 
 const execAsync = promisify(exec);
 
@@ -63,6 +67,7 @@ const HOST_EXECUTION_RULES = [
 
 let dockerAvailable = null;
 let runscAvailable = null;
+let microvmAvailable = null;
 let dockerImage = 'node:20-alpine';
 
 async function detectDocker() {
@@ -94,6 +99,17 @@ async function detectRunsc() {
     runscAvailable = false;
   }
   return runscAvailable;
+}
+
+async function detectMicrovm() {
+  if (microvmAvailable !== null) return microvmAvailable;
+  try {
+    await execAsync(`${microvmProvider.runnerBinary()} --self-test`, { timeout: 5000 });
+    microvmAvailable = true;
+  } catch {
+    microvmAvailable = false;
+  }
+  return microvmAvailable;
 }
 
 
@@ -163,51 +179,24 @@ function collectEscalationReasons(command) {
 
 
 async function runInDocker(command, projectRoot, { timeout = DEFAULT_TIMEOUT_MS, provider = 'docker' } = {}) {
-  return collectProcessOutput(spawnInDocker(command, projectRoot, provider), { timeout, mode: provider });
+  const spawner = provider === 'gvisor' ? gvisorProvider.spawn : dockerProvider.spawn;
+  return collectProcessOutput(spawner(command, projectRoot, { dockerImage }), { timeout, mode: provider });
 }
 
 
 async function runRestricted(command, projectRoot, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
   assertCommandSafe(command, projectRoot, { executionMode: 'sandbox' });
-  return collectProcessOutput(spawnRestricted(command, projectRoot), { timeout, mode: 'restricted' });
+  return collectProcessOutput(restrictedProvider.spawn(command, projectRoot), { timeout, mode: 'restricted' });
+}
+
+async function runInMicrovm(command, projectRoot, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
+  assertCommandSafe(command, projectRoot, { executionMode: 'sandbox' });
+  return collectProcessOutput(microvmProvider.spawn(command, projectRoot), { timeout, mode: 'microvm' });
 }
 
 async function runHostEscalated(command, projectRoot, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
   assertCommandSafe(command, projectRoot, { executionMode: 'host' });
   return collectProcessOutput(spawnHost(command, projectRoot), { timeout, mode: 'host' });
-}
-
-function spawnInDocker(command, projectRoot, provider = 'docker') {
-  const absRoot = path.resolve(projectRoot);
-  const dockerCmd = [
-    'docker', 'run', '--rm',
-    '--network=none',
-    '--memory=512m',
-    '--cpus=1',
-    '--pids-limit=64',
-    '--cap-drop=ALL',
-    '--security-opt=no-new-privileges',
-    '-v', `${absRoot}:/workspace:rw`,
-    '-w', '/workspace',
-    ...(provider === 'gvisor' ? ['--runtime=runsc'] : []),
-    dockerImage,
-    'sh', '-c', command,
-  ];
-  return spawn(dockerCmd[0], dockerCmd.slice(1), {
-    env: { PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' },
-  });
-}
-
-function spawnRestricted(command, projectRoot) {
-  const absRoot = path.resolve(projectRoot);
-  return spawn('sh', ['-c', command], {
-    cwd: absRoot,
-    env: {
-      PATH: '/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin',
-      NODE_ENV: 'development',
-      TMPDIR: absRoot + '/.tmp',
-    },
-  });
 }
 
 function spawnHost(command, projectRoot) {
@@ -298,6 +287,10 @@ function __setRunscAvailabilityForTests(value) {
   runscAvailable = value;
 }
 
+function __setMicrovmAvailabilityForTests(value) {
+  microvmAvailable = value;
+}
+
 async function runCommand(command, projectRoot, opts = {}) {
   const assessment = await assessCommand(command, projectRoot, opts);
   if (assessment.isInstall) {
@@ -344,6 +337,9 @@ async function runCommandApproved(command, projectRoot, opts = {}) {
   if (assessment.sandboxMode === 'gvisor' || assessment.sandboxMode === 'docker') {
     return runInDocker(command, projectRoot, { ...opts, timeout, provider: assessment.sandboxMode });
   }
+  if (assessment.sandboxMode === 'microvm') {
+    return runInMicrovm(command, projectRoot, { ...opts, timeout });
+  }
   return runRestricted(command, projectRoot, { ...opts, timeout });
 }
 
@@ -361,10 +357,15 @@ async function spawnCommandApproved(command, projectRoot, opts = {}) {
 
   if (assessment.sandboxMode === 'gvisor' || assessment.sandboxMode === 'docker') {
     assertCommandSafe(command, projectRoot, { executionMode: 'sandbox' });
-    return { proc: spawnInDocker(command, projectRoot, assessment.sandboxMode), mode: assessment.sandboxMode, assessment };
+    const spawner = assessment.sandboxMode === 'gvisor' ? gvisorProvider.spawn : dockerProvider.spawn;
+    return { proc: spawner(command, projectRoot, { dockerImage }), mode: assessment.sandboxMode, assessment };
+  }
+  if (assessment.sandboxMode === 'microvm') {
+    assertCommandSafe(command, projectRoot, { executionMode: 'sandbox' });
+    return { proc: microvmProvider.spawn(command, projectRoot), mode: 'microvm', assessment };
   }
   assertCommandSafe(command, projectRoot, { executionMode: 'sandbox' });
-  return { proc: spawnRestricted(command, projectRoot), mode: 'restricted', assessment };
+  return { proc: restrictedProvider.spawn(command, projectRoot), mode: 'restricted', assessment };
 }
 
 async function assessCommand(command, projectRoot, opts = {}) {
@@ -393,11 +394,13 @@ async function assessCommand(command, projectRoot, opts = {}) {
 async function getSandboxInfo(preferredProvider = null) {
   const docker = await detectDocker();
   const runsc = docker ? await detectRunsc() : false;
+  const microvm = await detectMicrovm();
   const preferred = preferredProvider || process.env.CLSCLAW_SANDBOX_PROVIDER || 'auto';
   const mode = await chooseSandboxMode(preferred);
   return {
     mode,
     dockerImage: docker ? dockerImage : null,
+    microvmRunner: microvm ? microvmProvider.runnerBinary() : null,
     blockedCommands: BLOCKED_COMMANDS.length,
     allowedCommands: ALLOWED_COMMANDS,
     hostAllowedCommands: HOST_ALLOWED_COMMANDS,
@@ -407,6 +410,7 @@ async function getSandboxInfo(preferredProvider = null) {
       restricted: true,
       docker,
       gvisor: docker && runsc,
+      microvm,
     },
     preferredProvider: preferred,
     maxTimeoutMs: DEFAULT_TIMEOUT_MS,
@@ -419,9 +423,12 @@ async function chooseSandboxMode(preferred = 'auto') {
   const normalized = String(preferred || 'auto').trim().toLowerCase();
   const docker = await detectDocker();
   const runsc = docker ? await detectRunsc() : false;
+  const microvm = await detectMicrovm();
+  if (normalized === 'microvm' && microvm) return 'microvm';
   if (normalized === 'gvisor' && docker && runsc) return 'gvisor';
   if (normalized === 'docker' && docker) return 'docker';
   if (normalized === 'restricted') return 'restricted';
+  if (microvm) return 'microvm';
   if (docker && runsc) return 'gvisor';
   if (docker) return 'docker';
   return 'restricted';
@@ -441,6 +448,8 @@ module.exports = {
   getSandboxInfo,
   detectDocker,
   detectRunsc,
+  detectMicrovm,
   __setDockerAvailabilityForTests,
   __setRunscAvailabilityForTests,
+  __setMicrovmAvailabilityForTests,
 };
