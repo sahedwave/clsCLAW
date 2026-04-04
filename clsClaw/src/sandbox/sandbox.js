@@ -62,6 +62,7 @@ const HOST_EXECUTION_RULES = [
 
 
 let dockerAvailable = null;
+let runscAvailable = null;
 let dockerImage = 'node:20-alpine';
 
 async function detectDocker() {
@@ -82,6 +83,17 @@ async function detectDocker() {
     console.log('[sandbox] Docker not available — using restricted child_process mode');
   }
   return dockerAvailable;
+}
+
+async function detectRunsc() {
+  if (runscAvailable !== null) return runscAvailable;
+  try {
+    await execAsync('runsc --version', { timeout: 5000 });
+    runscAvailable = true;
+  } catch {
+    runscAvailable = false;
+  }
+  return runscAvailable;
 }
 
 
@@ -150,8 +162,8 @@ function collectEscalationReasons(command) {
 }
 
 
-async function runInDocker(command, projectRoot, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
-  return collectProcessOutput(spawnInDocker(command, projectRoot), { timeout, mode: 'docker' });
+async function runInDocker(command, projectRoot, { timeout = DEFAULT_TIMEOUT_MS, provider = 'docker' } = {}) {
+  return collectProcessOutput(spawnInDocker(command, projectRoot, provider), { timeout, mode: provider });
 }
 
 
@@ -165,7 +177,7 @@ async function runHostEscalated(command, projectRoot, { timeout = DEFAULT_TIMEOU
   return collectProcessOutput(spawnHost(command, projectRoot), { timeout, mode: 'host' });
 }
 
-function spawnInDocker(command, projectRoot) {
+function spawnInDocker(command, projectRoot, provider = 'docker') {
   const absRoot = path.resolve(projectRoot);
   const dockerCmd = [
     'docker', 'run', '--rm',
@@ -177,6 +189,7 @@ function spawnInDocker(command, projectRoot) {
     '--security-opt=no-new-privileges',
     '-v', `${absRoot}:/workspace:rw`,
     '-w', '/workspace',
+    ...(provider === 'gvisor' ? ['--runtime=runsc'] : []),
     dockerImage,
     'sh', '-c', command,
   ];
@@ -281,6 +294,10 @@ function __setDockerAvailabilityForTests(value) {
   dockerAvailable = value;
 }
 
+function __setRunscAvailabilityForTests(value) {
+  runscAvailable = value;
+}
+
 async function runCommand(command, projectRoot, opts = {}) {
   const assessment = await assessCommand(command, projectRoot, opts);
   if (assessment.isInstall) {
@@ -324,10 +341,10 @@ async function runCommandApproved(command, projectRoot, opts = {}) {
     return runHostEscalated(command, projectRoot, { ...opts, timeout });
   }
 
-  const useDocker = await detectDocker();
-  return useDocker
-    ? runInDocker(command, projectRoot, { ...opts, timeout })
-    : runRestricted(command, projectRoot, { ...opts, timeout });
+  if (assessment.sandboxMode === 'gvisor' || assessment.sandboxMode === 'docker') {
+    return runInDocker(command, projectRoot, { ...opts, timeout, provider: assessment.sandboxMode });
+  }
+  return runRestricted(command, projectRoot, { ...opts, timeout });
 }
 
 async function spawnCommandApproved(command, projectRoot, opts = {}) {
@@ -342,10 +359,9 @@ async function spawnCommandApproved(command, projectRoot, opts = {}) {
     return { proc: spawnHost(command, projectRoot), mode: 'host', assessment };
   }
 
-  const useDocker = await detectDocker();
-  if (useDocker) {
+  if (assessment.sandboxMode === 'gvisor' || assessment.sandboxMode === 'docker') {
     assertCommandSafe(command, projectRoot, { executionMode: 'sandbox' });
-    return { proc: spawnInDocker(command, projectRoot), mode: 'docker', assessment };
+    return { proc: spawnInDocker(command, projectRoot, assessment.sandboxMode), mode: assessment.sandboxMode, assessment };
   }
   assertCommandSafe(command, projectRoot, { executionMode: 'sandbox' });
   return { proc: spawnRestricted(command, projectRoot), mode: 'restricted', assessment };
@@ -358,7 +374,7 @@ async function assessCommand(command, projectRoot, opts = {}) {
   const installRequest = detectInstall(normalized, projectRoot);
   assertCommandSafe(normalized, projectRoot, { executionMode: 'host' });
   const reasons = collectEscalationReasons(normalized);
-  const sandboxMode = await detectDocker() ? 'docker' : 'restricted';
+  const sandboxMode = await chooseSandboxMode(opts.providerPreference || opts.sandboxProvider || process.env.CLSCLAW_SANDBOX_PROVIDER || 'auto');
 
   return {
     command: normalized,
@@ -374,20 +390,41 @@ async function assessCommand(command, projectRoot, opts = {}) {
   };
 }
 
-async function getSandboxInfo() {
+async function getSandboxInfo(preferredProvider = null) {
   const docker = await detectDocker();
+  const runsc = docker ? await detectRunsc() : false;
+  const preferred = preferredProvider || process.env.CLSCLAW_SANDBOX_PROVIDER || 'auto';
+  const mode = await chooseSandboxMode(preferred);
   return {
-    mode: docker ? 'docker' : 'restricted',
+    mode,
     dockerImage: docker ? dockerImage : null,
     blockedCommands: BLOCKED_COMMANDS.length,
     allowedCommands: ALLOWED_COMMANDS,
     hostAllowedCommands: HOST_ALLOWED_COMMANDS,
     supportsHostEscalation: true,
     defaultExecutionMode: 'sandbox',
+    availableProviders: {
+      restricted: true,
+      docker,
+      gvisor: docker && runsc,
+    },
+    preferredProvider: preferred,
     maxTimeoutMs: DEFAULT_TIMEOUT_MS,
     installTimeoutMs: INSTALL_TIMEOUT_MS,
     maxOutputBytes: MAX_OUTPUT_BYTES,
   };
+}
+
+async function chooseSandboxMode(preferred = 'auto') {
+  const normalized = String(preferred || 'auto').trim().toLowerCase();
+  const docker = await detectDocker();
+  const runsc = docker ? await detectRunsc() : false;
+  if (normalized === 'gvisor' && docker && runsc) return 'gvisor';
+  if (normalized === 'docker' && docker) return 'docker';
+  if (normalized === 'restricted') return 'restricted';
+  if (docker && runsc) return 'gvisor';
+  if (docker) return 'docker';
+  return 'restricted';
 }
 
 module.exports = {
@@ -403,5 +440,7 @@ module.exports = {
   assertCommandSafe,
   getSandboxInfo,
   detectDocker,
+  detectRunsc,
   __setDockerAvailabilityForTests,
+  __setRunscAvailabilityForTests,
 };

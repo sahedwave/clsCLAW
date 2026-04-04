@@ -783,6 +783,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
       </div>
       <div id="swarm-preview-host" style="margin-bottom:10px"></div>
       <div id="swarm-sessions-host" style="margin-bottom:12px"></div>
+      <div id="delegation-host" style="margin-bottom:12px"></div>
       <div class="scrollable" style="padding:0" id="agents-list">
         <div class="empty-state"><span style="font-size:22px">⚡</span><span>No agents running</span><span>Each agent runs in its own worker thread + git worktree</span></div>
       </div>
@@ -925,6 +926,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
             <button class="gh-btn" onclick="loadGitHubWebhooks()">Load recent webhooks</button>
             <button class="gh-btn" onclick="copyGitHubWebhookUrl()">Copy webhook URL</button>
           </div>
+          <div id="gh-tunnel-host" style="margin-top:10px"></div>
           <div class="gh-out" id="gh-webhooks-out"></div>
         </div>
         <div class="gh-sec">
@@ -1173,6 +1175,13 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
     <input type="password" id="cfg-slack-webhook" placeholder="https://hooks.slack.com/services/..." />
     <label>GitHub webhook secret</label>
     <input type="password" id="cfg-github-webhook-secret" placeholder="shared secret for inbound webhooks" />
+    <label>Sandbox provider</label>
+    <select id="cfg-sandbox-provider">
+      <option value="auto">Auto</option>
+      <option value="gvisor">gVisor (runsc)</option>
+      <option value="docker">Docker</option>
+      <option value="restricted">Restricted host mode</option>
+    </select>
     <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-top:8px">
       Any one model provider is enough for chat, agents, and plans. Semantic retrieval can use Ollama locally, OpenAI, Anthropic, or stay keyword-only.
     </div>
@@ -1184,6 +1193,8 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
       </div>
       <div id="auth-settings-summary" style="font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:8px">Loading auth state...</div>
       <div id="auth-users-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      <div id="auth-sessions-list" style="display:flex;flex-direction:column;gap:6px;margin-top:8px"></div>
+      <div id="auth-activity-list" style="display:flex;flex-direction:column;gap:6px;margin-top:8px"></div>
     </div>
     <div class="modal-row">
       <button class="modal-btn" onclick="closeModal('modal-settings')">Cancel</button>
@@ -1354,6 +1365,7 @@ let providerDraft = {
   embeddingProvider: 'auto',
   slackWebhookUrl: '',
   githubWebhookSecret: '',
+  sandboxProvider: 'auto',
 };
 let providerStatus = {
   anthropicConfigured: false,
@@ -1363,6 +1375,7 @@ let providerStatus = {
   embeddingProvider: 'auto',
   slackConfigured: false,
   githubWebhookConfigured: false,
+  sandboxProvider: 'auto',
 };
 let authState = {
   configured: false,
@@ -1493,12 +1506,16 @@ async function logoutAuth() {
 async function loadAuthUsers() {
   const summary = document.getElementById('auth-settings-summary');
   const list = document.getElementById('auth-users-list');
+  const sessionsHost = document.getElementById('auth-sessions-list');
+  const activityHost = document.getElementById('auth-activity-list');
   const addUserBtn = document.getElementById('auth-add-user-btn');
   if (!summary || !list) return;
   const role = authState.user?.role || 'viewer';
   if (!authState.authenticated) {
     summary.textContent = 'You are not signed in.';
     list.innerHTML = '';
+    if (sessionsHost) sessionsHost.innerHTML = '';
+    if (activityHost) activityHost.innerHTML = '';
     if (addUserBtn) addUserBtn.style.display = 'none';
     return;
   }
@@ -1506,9 +1523,14 @@ async function loadAuthUsers() {
   if (addUserBtn) addUserBtn.style.display = role === 'admin' ? 'inline-flex' : 'none';
   if (role !== 'admin') {
     list.innerHTML = `<div style="font-size:11px;color:var(--muted)">Only admins can create or list local users.</div>`;
+    if (sessionsHost) sessionsHost.innerHTML = '';
+    if (activityHost) activityHost.innerHTML = '';
     return;
   }
   const users = await api('GET', '/api/auth/users').catch(() => []);
+  const sessions = await api('GET', '/api/auth/sessions').catch(() => []);
+  const activity = await api('GET', '/api/collab/activity?limit=6').catch(() => []);
+  const usersById = new Map((users || []).map((user) => [user.id, user]));
   list.innerHTML = (users || []).map((user) => `
     <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--bg2);display:flex;align-items:center;gap:8px">
       <div style="flex:1">
@@ -1516,8 +1538,33 @@ async function loadAuthUsers() {
         <div style="font-size:10px;font-family:var(--mono);color:var(--muted)">${esc(user.username)} · ${esc(user.role || 'member')}</div>
       </div>
       <span class="review-anchor exact">${esc(user.disabled ? 'disabled' : 'active')}</span>
+      ${authState.user?.id !== user.id ? `<button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="toggleAuthUser('${user.id}', ${user.disabled ? 'false' : 'true'})">${user.disabled ? 'enable' : 'disable'}</button>` : ''}
     </div>
   `).join('') || `<div style="font-size:11px;color:var(--muted)">No local users yet.</div>`;
+  if (sessionsHost) {
+    sessionsHost.innerHTML = `<div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--hint)">Active sessions</div>${
+      (sessions || []).length
+        ? sessions.map((session) => `<div style="font-size:11px;color:var(--muted)">${esc(usersById.get(session.userId)?.username || session.userId)} · ${esc(timeAgo(session.lastSeenAt || session.createdAt))}</div>`).join('')
+        : `<div style="font-size:11px;color:var(--muted)">No active sessions.</div>`
+    }`;
+  }
+  if (activityHost) {
+    activityHost.innerHTML = `<div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--hint)">Recent collaboration activity</div>${
+      (activity || []).length
+        ? activity.map((item) => `<div style="font-size:11px;color:var(--muted)">${esc(item.actor?.username || 'system')} · ${esc(item.kind)} · ${esc(item.status || '')} · ${esc(item.title || '')}</div>`).join('')
+        : `<div style="font-size:11px;color:var(--muted)">No recent activity yet.</div>`
+    }`;
+  }
+}
+
+async function toggleAuthUser(id, disabled) {
+  const result = await api('PATCH', `/api/auth/users/${id}`, { disabled }).catch((err) => {
+    toast(err.message, 'err');
+    return null;
+  });
+  if (!result?.ok) return;
+  toast(`✓ User ${disabled ? 'disabled' : 'enabled'}`, 'ok');
+  loadAuthUsers();
 }
 
 async function createAuthUser() {
@@ -1563,14 +1610,16 @@ async function init(isRetry = false) {
   
   if (cfg.sandboxInfo) {
     const sb = document.getElementById('sb-badge');
-    sb.textContent = cfg.sandboxInfo.mode === 'docker' ? '🐳 docker' : '⚠ restricted';
-    sb.className = 'sb-mode ' + (cfg.sandboxInfo.mode === 'docker' ? 'docker' : 'restricted');
+    const mode = cfg.sandboxInfo.mode || 'restricted';
+    sb.textContent = mode === 'gvisor' ? '🛡 gvisor' : mode === 'docker' ? '🐳 docker' : '⚠ restricted';
+    sb.className = 'sb-mode ' + (mode === 'restricted' ? 'restricted' : 'docker');
   }
 
   await loadFiles();
   await loadSkills();
   await loadConnectors();
   await loadSwarmSessions();
+  await loadDelegationTargets();
   await loadAutomationInbox();
   await loadGitHubWebhooks();
   await loadChanges();
@@ -2785,6 +2834,38 @@ async function loadSwarmSessions() {
     : '';
 }
 
+async function loadDelegationTargets() {
+  const host = document.getElementById('delegation-host');
+  if (!host) return;
+  const targets = await api('GET', '/api/delegation/targets').catch(() => []);
+  const dispatches = await api('GET', '/api/delegation/dispatches?limit=4').catch(() => []);
+  host.innerHTML = `
+    <div class="discover-panel">
+      <div class="discover-heading">
+        <div>
+          <div class="discover-kicker">Remote Delegation</div>
+          <div class="discover-summary">Delegate a task to another clsClaw instance with signed requests.</div>
+        </div>
+        <button class="gh-btn" style="width:auto;padding:6px 10px;margin:0" onclick="createDelegationTarget()">add target</button>
+      </div>
+      ${(targets || []).length ? targets.map((target) => `
+        <div class="discover-card" style="cursor:default;margin-bottom:8px">
+          <div class="discover-top">
+            <span class="discover-label">${esc(target.enabled ? 'enabled' : 'disabled')}</span>
+            <span class="discover-profile">${esc(target.name || 'target')}</span>
+          </div>
+          <div class="discover-detail">${esc(target.url || '')}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+            <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="dispatchDelegationTarget('${target.id}')">delegate current task</button>
+            <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="toggleDelegationTarget('${target.id}', ${target.enabled ? 'false' : 'true'})">${target.enabled ? 'disable' : 'enable'}</button>
+          </div>
+        </div>
+      `).join('') : `<div style="font-size:11px;color:var(--muted)">No remote delegation targets yet.</div>`}
+      ${(dispatches || []).length ? `<div style="margin-top:10px;font-size:10px;color:var(--hint);text-transform:uppercase;letter-spacing:.08em">Recent dispatches</div>${dispatches.map((item) => `<div style="font-size:11px;color:var(--muted);margin-top:6px">${esc(item.targetName || 'target')} · ${esc(item.status || 'accepted')} · ${esc(item.goal || '')}</div>`).join('')}` : ''}
+    </div>
+  `;
+}
+
 async function loadAgents() {
   const agents = await api('GET', '/api/agents').catch(() => []);
   const running = agents.filter(a => a.status === 'running').length;
@@ -2793,6 +2874,45 @@ async function loadAgents() {
   renderAgentList(agents, 'agents-list', true);
   renderAgentList(agents.slice(0,4), 'mini-agents', false);
   loadSwarmSessions();
+  loadDelegationTargets();
+}
+
+async function createDelegationTarget() {
+  const name = prompt('Remote clsClaw name');
+  if (name === null) return;
+  const url = prompt('Remote clsClaw base URL (for example https://remote.example.com)');
+  if (url === null) return;
+  const sharedSecret = prompt('Shared secret for signed delegation requests');
+  if (sharedSecret === null) return;
+  const result = await api('POST', '/api/delegation/targets', { name, url, sharedSecret }).catch((err) => {
+    toast(err.message, 'err');
+    return null;
+  });
+  if (!result?.ok) return;
+  toast('✓ Delegation target saved', 'ok');
+  loadDelegationTargets();
+}
+
+async function toggleDelegationTarget(id, enabled) {
+  const result = await api('PATCH', `/api/delegation/targets/${id}`, { enabled }).catch((err) => {
+    toast(err.message, 'err');
+    return null;
+  });
+  if (!result?.ok) return;
+  toast(`✓ Target ${enabled ? 'enabled' : 'disabled'}`, 'ok');
+  loadDelegationTargets();
+}
+
+async function dispatchDelegationTarget(id) {
+  const goal = (document.getElementById('composer')?.value || '').trim() || prompt('What should the remote clsClaw work on?');
+  if (!goal) return;
+  const result = await api('POST', '/api/delegation/dispatch', { targetId: id, goal, role: currentMode === 'build' ? 'code' : 'analyze' }).catch((err) => {
+    toast(err.message, 'err');
+    return null;
+  });
+  if (!result?.ok) return;
+  toast('✓ Remote delegation dispatched', 'ok');
+  loadDelegationTargets();
 }
 
 function renderAgentList(agents, containerId, full) {
@@ -3534,7 +3654,7 @@ async function openArtifact(id) {
         <div style="font-size:12px;font-weight:700;margin-bottom:8px">${esc(artifact.title || 'Artifact')}</div>
         <div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">${esc(artifact.type || 'artifact')} · ${timeAgo(artifact.createdAt)}</div>
         ${artifact.summary ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">${esc(artifact.summary)}</div>` : ''}
-        ${renderArtifactMetadataRows({ ...(artifact.metadata || {}), projectRoot: artifact.projectRoot || '' })}
+        ${renderArtifactMetadataRows({ ...(artifact.metadata || {}), projectRoot: artifact.projectRoot || '', createdBy: artifact.createdBy?.username || artifact.createdBy?.displayName || '' })}
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:8px">
           <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="sendArtifactToSlack('${artifact.id}')">send to Slack</button>
         </div>
@@ -3667,6 +3787,7 @@ async function ghLoadPRThreads() {
 }
 
 async function loadGitHubWebhooks() {
+  await loadTunnelStatus();
   const events = await api('GET', '/api/github/webhooks/recent?limit=12').catch((err) => {
     showGhOut('gh-webhooks-out', err.message, true);
     return null;
@@ -3688,6 +3809,65 @@ async function loadGitHubWebhooks() {
     </div>
   `).join('');
   showGhOut('gh-webhooks-out', html, false, true);
+}
+
+async function loadTunnelStatus() {
+  const host = document.getElementById('gh-tunnel-host');
+  if (!host) return;
+  const status = await api('GET', '/api/tunnel/status').catch(() => null);
+  if (!status) {
+    host.innerHTML = '';
+    return;
+  }
+  const installed = (status.availableProviders || []).map((item) => `${item.id}:${item.installed ? 'yes' : 'no'}`).join(' · ');
+  host.innerHTML = `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg2)">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <div>
+          <div style="font-size:12px;font-weight:700">Inbound tunnel</div>
+          <div style="font-size:11px;color:var(--muted)">${esc(status.status || 'idle')} · provider ${esc(status.provider || 'cloudflared')} · installed ${esc(installed || 'none')}</div>
+          ${status.publicUrl ? `<div style="font-size:11px;font-family:var(--mono);color:var(--accent2);margin-top:6px">${esc(status.publicUrl)}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="configureTunnel()">configure</button>
+          <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="startTunnel()">start</button>
+          <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="stopTunnel()">stop</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function configureTunnel() {
+  const provider = prompt('Tunnel provider: cloudflared or ngrok', 'cloudflared');
+  if (provider === null) return;
+  const result = await api('POST', '/api/tunnel', { action: 'configure', provider, port: 3737 }).catch((err) => {
+    toast(err.message, 'err');
+    return null;
+  });
+  if (!result) return;
+  toast('✓ Tunnel settings saved', 'ok');
+  loadTunnelStatus();
+}
+
+async function startTunnel() {
+  const status = await api('GET', '/api/tunnel/status').catch(() => ({ provider: 'cloudflared' }));
+  const result = await api('POST', '/api/tunnel', { provider: status.provider || 'cloudflared', port: 3737 }).catch((err) => {
+    toast(err.message, 'err');
+    return null;
+  });
+  if (!result) return;
+  toast('✓ Tunnel start requested', 'ok');
+  setTimeout(loadTunnelStatus, 600);
+}
+
+async function stopTunnel() {
+  await api('DELETE', '/api/tunnel').catch((err) => {
+    toast(err.message, 'err');
+    return null;
+  });
+  toast('✓ Tunnel stopped', 'ok');
+  loadTunnelStatus();
 }
 
 async function copyGitHubWebhookUrl() {
@@ -5896,6 +6076,7 @@ function applyProviderState(providers) {
     embeddingProvider: providers.embeddingProvider || 'auto',
     slackConfigured: !!providers.slackConfigured,
     githubWebhookConfigured: !!providers.githubWebhookConfigured,
+    sandboxProvider: providers.sandboxProvider || 'auto',
   };
   providerDraft = {
     anthropicKey: providers.anthropicKey || '',
@@ -5906,6 +6087,7 @@ function applyProviderState(providers) {
     embeddingProvider: providers.embeddingProvider || 'auto',
     slackWebhookUrl: providers.slackWebhookUrl || '',
     githubWebhookSecret: providers.githubWebhookSecret || '',
+    sandboxProvider: providers.sandboxProvider || 'auto',
   };
   const anth = document.getElementById('cfg-anthropic');
   const openai = document.getElementById('cfg-openai');
@@ -5915,6 +6097,7 @@ function applyProviderState(providers) {
   const embeddingProvider = document.getElementById('cfg-embedding-provider');
   const slackWebhookUrl = document.getElementById('cfg-slack-webhook');
   const githubWebhookSecret = document.getElementById('cfg-github-webhook-secret');
+  const sandboxProvider = document.getElementById('cfg-sandbox-provider');
   if (anth) anth.value = providerDraft.anthropicKey;
   if (openai) openai.value = providerDraft.openaiKey;
   if (ollamaUrl) ollamaUrl.value = providerDraft.ollamaUrl;
@@ -5923,6 +6106,7 @@ function applyProviderState(providers) {
   if (embeddingProvider) embeddingProvider.value = providerDraft.embeddingProvider || 'auto';
   if (slackWebhookUrl) slackWebhookUrl.value = providerDraft.slackWebhookUrl;
   if (githubWebhookSecret) githubWebhookSecret.value = providerDraft.githubWebhookSecret;
+  if (sandboxProvider) sandboxProvider.value = providerDraft.sandboxProvider || 'auto';
 }
 
 function hasAnthropicProvider() {
@@ -6002,6 +6186,7 @@ async function saveSettings() {
   const embeddingProvider = document.getElementById('cfg-embedding-provider').value;
   const slackWebhookUrl = document.getElementById('cfg-slack-webhook').value.trim();
   const githubWebhookSecret = document.getElementById('cfg-github-webhook-secret').value.trim();
+  const sandboxProvider = document.getElementById('cfg-sandbox-provider').value;
 
   const payload = {
     root,
@@ -6010,6 +6195,7 @@ async function saveSettings() {
     ollamaModel,
     ollamaEmbeddingModel,
     embeddingProvider,
+    sandboxProvider,
   };
   if (!isMaskedSecret(anthropicKey)) payload.anthropicKey = anthropicKey;
   if (!isMaskedSecret(openaiKey)) payload.openaiKey = openaiKey;

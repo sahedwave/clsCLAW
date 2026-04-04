@@ -36,6 +36,7 @@ class TurnOrchestrator extends EventEmitter {
     providers,
     policy,
     messages = [],
+    actor = null,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     onEvent = null,
     onToken = null,
@@ -59,6 +60,7 @@ class TurnOrchestrator extends EventEmitter {
       toolLoop,
       summary: buildTurnSummary(policy),
       deliberation,
+      actor,
     });
     this._traceStore.updateDeliberation(turn.id, deliberation);
     emit('trace_start', {
@@ -632,6 +634,7 @@ function createTurnArtifact({ artifactStore, turn, policy, finalAnswer, usedTool
       verificationStatus: verification?.status || null,
       approvalRequired: Boolean(turn.governor?.shouldPauseForApproval),
     },
+    createdBy: turn.meta?.actor || null,
     content: JSON.stringify({
       userText: turn.meta?.userText || '',
       finalAnswer: String(finalAnswer || ''),

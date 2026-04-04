@@ -24,7 +24,7 @@ class ApprovalQueue extends EventEmitter {
 
   
 
-  async propose({ filePath, newContent, agentId, agentName, description, projectRoot, realProjectRoot, worktreePath, evidenceBundle = null, approvalContext = null }) {
+  async propose({ filePath, newContent, agentId, agentName, description, projectRoot, realProjectRoot, worktreePath, evidenceBundle = null, approvalContext = null, actor = null }) {
     const id = uuid();
 
     
@@ -65,6 +65,7 @@ class ApprovalQueue extends EventEmitter {
       status:      'pending',   // 'pending' | 'conflict'
       conflicts:   [],          // ids of other pending changes on the same file
       proposedAt:  Date.now(),
+      proposedBy:  actor && typeof actor === 'object' ? { ...actor } : null,
     };
 
 
@@ -93,7 +94,7 @@ class ApprovalQueue extends EventEmitter {
     this.emit('proposed', this._stripContent(pending));
     return pending;
   }
-  async proposeReview({ jobId, jobName, skillId, runId, summary, result, projectRoot }) {
+  async proposeReview({ jobId, jobName, skillId, runId, summary, result, projectRoot, actor = null }) {
     const id = uuid();
     const reviewData = buildInlineReviewData({ result, projectRoot });
     const evidenceBundle = buildEvidenceBundle([
@@ -159,6 +160,7 @@ class ApprovalQueue extends EventEmitter {
       agentName:  jobName + ' (auto)',
       status:     'pending',
       proposedAt: Date.now(),
+      proposedBy: actor && typeof actor === 'object' ? { ...actor } : null,
 
       diff:       null,
       filePath:   null,
@@ -190,13 +192,14 @@ class ApprovalQueue extends EventEmitter {
     return { ok: true, change: this._prepareChangeForRead(change) };
   }
 
-  async approve(changeId) {
+  async approve(changeId, actor = null) {
     const change = this._pending.get(changeId);
     if (!change) return { ok: false, error: 'Change not found' };
 
     if (change.type === 'review') {
       change.status     = 'acknowledged';
       change.resolvedAt = Date.now();
+      change.resolvedBy = actor && typeof actor === 'object' ? { ...actor } : null;
       this._pending.delete(changeId);
       this._recordHistory(change);
       this.emit('approved', this._stripContent(change));
@@ -222,6 +225,7 @@ class ApprovalQueue extends EventEmitter {
       });
       change.status     = 'approved';
       change.resolvedAt = Date.now();
+      change.resolvedBy = actor && typeof actor === 'object' ? { ...actor } : null;
       this._pending.delete(changeId);
       this._cleanupConflictRefs(changeId);
       this._recordHistory(change);
@@ -233,13 +237,14 @@ class ApprovalQueue extends EventEmitter {
   }
 
 
-  reject(changeId, reason = 'User rejected') {
+  reject(changeId, reason = 'User rejected', actor = null) {
     const change = this._pending.get(changeId);
     if (!change) return { ok: false, error: 'Change not found' };
 
     change.status     = 'rejected';
     change.reason     = reason;
     change.resolvedAt = Date.now();
+    change.resolvedBy = actor && typeof actor === 'object' ? { ...actor } : null;
     this._pending.delete(changeId);
 
     this._cleanupConflictRefs(changeId);
@@ -250,12 +255,12 @@ class ApprovalQueue extends EventEmitter {
   }
 
 
-  async editAndApprove(changeId, editedContent) {
+  async editAndApprove(changeId, editedContent, actor = null) {
     const change = this._pending.get(changeId);
     if (!change) return { ok: false, error: 'Change not found' };
     change.newContent = editedContent;
     change.diff       = diffFileVsProposed(change.filePath, editedContent);
-    return this.approve(changeId);
+    return this.approve(changeId, actor);
   }
 
 
@@ -331,6 +336,8 @@ class ApprovalQueue extends EventEmitter {
       reason:         change.reason,
       proposedAt:     change.proposedAt,
       resolvedAt:     change.resolvedAt,
+      proposedBy:     change.proposedBy || null,
+      resolvedBy:     change.resolvedBy || null,
       worktreePath:   change.worktreePath,
       stats:          change.diff?.stats,
       approvalContext: change.approvalContext || null,

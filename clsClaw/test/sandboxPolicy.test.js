@@ -51,6 +51,21 @@ test('assessCommand marks network and desktop commands as host escalation', asyn
   }
 });
 
+test('assessCommand prefers gvisor when runsc and docker are available', async () => {
+  sandbox.__setDockerAvailabilityForTests(true);
+  sandbox.__setRunscAvailabilityForTests(true);
+  const workspace = makeWorkspace();
+
+  try {
+    const assessment = await sandbox.assessCommand('ls', workspace, { providerPreference: 'gvisor' });
+    assert.equal(assessment.sandboxMode, 'gvisor');
+  } finally {
+    cleanup(workspace);
+    sandbox.__setDockerAvailabilityForTests(null);
+    sandbox.__setRunscAvailabilityForTests(null);
+  }
+});
+
 test('runCommandApproved executes explicitly approved host commands in host mode', async () => {
   sandbox.__setDockerAvailabilityForTests(true);
   const workspace = makeWorkspace();

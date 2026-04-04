@@ -45,6 +45,8 @@ const TurnTraceStore = require('./orchestration/turnTraceStore');
 const { ToolRuntime } = require('./orchestration/toolRuntime');
 const { TurnOrchestrator } = require('./orchestration/turnOrchestrator');
 const { buildCompanionFeed } = require('./remote/companionFeed');
+const { TunnelManager } = require('./remote/tunnelManager');
+const { DelegationRegistry } = require('./remote/delegationRegistry');
 const VersionStore  = require('./versions/versionStore');
 const modelRouter   = require('./llm/modelRouter');
 const {
@@ -110,6 +112,8 @@ const mcpRegistry = new McpRegistry({
 const imageStore = new ImageStore(path.join(DATA_DIR, 'uploads'));
 const artifactStore = new ArtifactStore(path.join(DATA_DIR, 'artifacts'));
 const webhookStore = new GitHubWebhookStore(path.join(DATA_DIR, 'github', 'webhooks.json'));
+const tunnelManager = new TunnelManager({ dataFile: path.join(DATA_DIR, 'remote', 'tunnel.json') });
+const delegationRegistry = new DelegationRegistry({ dataFile: path.join(DATA_DIR, 'remote', 'delegation.json') });
 const turnTraceStore = new TurnTraceStore(path.join(DATA_DIR, 'turns'));
 const toolRuntime = new ToolRuntime({
   projectRootGetter: () => projectRoot,
@@ -165,6 +169,16 @@ function setLastSystemError(message, meta = {}) {
 
 function resolveModelProviders(preferred = null) {
   return resolveProviderConfig(preferred || providerConfig);
+}
+
+function currentActor(auth) {
+  if (!auth?.user) return null;
+  return {
+    id: auth.user.id,
+    username: auth.user.username,
+    displayName: auth.user.displayName,
+    role: auth.user.role,
+  };
 }
 
 function createRequestController(req, timeoutMs = 60000) {
@@ -273,7 +287,7 @@ function buildExecPermissionRequest(command, assessment, { agentId = 'manual' } 
 }
 
 async function ensureCommandPermission({ command, projectRoot, skipApproval, agentId = 'manual' } = {}) {
-  const assessment = await sandbox.assessCommand(command, projectRoot);
+  const assessment = await sandbox.assessCommand(command, projectRoot, { providerPreference: providerConfig.sandboxProvider });
   if (skipApproval && !assessment.requiresEscalation) {
     return assessment;
   }
@@ -365,7 +379,7 @@ async function router(req, res) {
 
   let body = {};
   let rawBody = '';
-  const wantsRawBody = pathname === '/api/github/webhook' && method === 'POST';
+  const wantsRawBody = (pathname === '/api/github/webhook' || pathname === '/api/delegation/execute') && method === 'POST';
   if (wantsRawBody) {
     rawBody = await readRawBody(req);
     try {
@@ -379,7 +393,7 @@ async function router(req, res) {
 
   const q = parsed.query;
 
-  const publicApiPaths = new Set(['/api/auth/status', '/api/auth/bootstrap', '/api/auth/login', '/api/github/webhook']);
+  const publicApiPaths = new Set(['/api/auth/status', '/api/auth/bootstrap', '/api/auth/login', '/api/github/webhook', '/api/delegation/execute']);
   if (pathname.startsWith('/api/') && pathname !== '/api/events' && !publicApiPaths.has(pathname)) {
     if (authStore.isConfigured() && !auth) {
       return json(res, 401, { error: 'Authentication required', authRequired: true });
@@ -465,9 +479,29 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
       return json(res, 400, { error: err.message });
     }
   }
+  const authUserM = pathname.match(/^\/api\/auth\/users\/([^/]+)$/);
+  if (authUserM) {
+    if (auth?.user?.role !== 'admin') return json(res, 403, { error: 'Admin access required' });
+    if (method === 'PATCH') {
+      try {
+        const user = authStore.updateUser(authUserM[1], body || {});
+        return user ? json(res, 200, { ok: true, user }) : json(res, 404, { error: 'User not found' });
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+    if (method === 'DELETE') {
+      const result = authStore.deleteUser(authUserM[1]);
+      return json(res, result.ok ? 200 : 404, result);
+    }
+  }
+  if (is('/api/auth/sessions', 'GET')) {
+    if (auth?.user?.role !== 'admin') return json(res, 403, { error: 'Admin access required' });
+    return json(res, 200, authStore.listSessions());
+  }
 
   if (is('/api/config', 'GET')) {
-    const sbInfo = await sandbox.getSandboxInfo();
+    const sbInfo = await sandbox.getSandboxInfo(providerConfig.sandboxProvider);
     return json(res, 200, {
       projectRoot,
       sandboxInfo: sbInfo,
@@ -493,6 +527,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
       embeddingProvider,
       slackWebhookUrl,
       githubWebhookSecret,
+      sandboxProvider,
     } = body;
     if (root) {
       if (!fs.existsSync(root)) return json(res, 400, { error: 'Path does not exist' });
@@ -510,6 +545,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
     if (Object.prototype.hasOwnProperty.call(body, 'embeddingProvider')) resolvedInput.embeddingProvider = embeddingProvider;
     if (Object.prototype.hasOwnProperty.call(body, 'slackWebhookUrl')) resolvedInput.slackWebhookUrl = slackWebhookUrl;
     if (Object.prototype.hasOwnProperty.call(body, 'githubWebhookSecret')) resolvedInput.githubWebhookSecret = githubWebhookSecret;
+    if (Object.prototype.hasOwnProperty.call(body, 'sandboxProvider')) resolvedInput.sandboxProvider = sandboxProvider;
     const resolvedProviders = resolveProviderConfig(resolvedInput);
     providerConfig = {
       ...providerConfig,
@@ -527,6 +563,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
       ollamaEmbeddingModel: providerConfig.ollamaEmbeddingModel,
       embeddingProvider: providerConfig.embeddingProvider,
       slackWebhookUrl: providerConfig.slackWebhookUrl,
+      sandboxProvider: providerConfig.sandboxProvider,
       githubWebhookSecret: providerConfig.githubWebhookSecret,
     });
     return json(res, 200, {
@@ -561,6 +598,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
     if (Object.prototype.hasOwnProperty.call(body, 'embeddingProvider')) payload.embeddingProvider = body.embeddingProvider;
     if (Object.prototype.hasOwnProperty.call(body, 'slackWebhookUrl')) payload.slackWebhookUrl = body.slackWebhookUrl;
     if (Object.prototype.hasOwnProperty.call(body, 'githubWebhookSecret')) payload.githubWebhookSecret = body.githubWebhookSecret;
+    if (Object.prototype.hasOwnProperty.call(body, 'sandboxProvider')) payload.sandboxProvider = body.sandboxProvider;
     providerConfig = resolveProviderConfig(payload);
     githubToken = providerConfig.githubToken;
     contextEngine.setProviderConfig(providerConfig);
@@ -574,6 +612,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
       ollamaEmbeddingModel: providerConfig.ollamaEmbeddingModel,
       embeddingProvider: providerConfig.embeddingProvider,
       slackWebhookUrl: providerConfig.slackWebhookUrl,
+      sandboxProvider: providerConfig.sandboxProvider,
       githubWebhookSecret: providerConfig.githubWebhookSecret,
     });
     return json(res, 200, {
@@ -613,7 +652,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
   }
 
   if (is('/api/health', 'GET')) {
-    const sbInfo   = await sandbox.getSandboxInfo();
+    const sbInfo   = await sandbox.getSandboxInfo(providerConfig.sandboxProvider);
     const ctxStats = contextEngine.getStats();
     const agents   = agentManager.getAll();
     const pending  = approvalQueue.getPending();
@@ -640,6 +679,8 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
       sandbox: {
         mode:          sbInfo.mode,
         docker:        dockerOk,
+        gvisor:        Boolean(sbInfo.availableProviders?.gvisor),
+        preferredProvider: sbInfo.preferredProvider || providerConfig.sandboxProvider || 'auto',
         allowedCmds:   sbInfo.allowedCommands?.length || 0,
       },
       git: {
@@ -694,6 +735,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
         remoteProvidersConfigured: Boolean(providerStatus.anthropicConfigured || providerStatus.openaiConfigured),
         localModelConfigured: Boolean(providerStatus.localConfigured),
       },
+      tunnel: tunnelManager.getStatus(),
       llmReady: Boolean(providerStatus.anthropicConfigured || providerStatus.openaiConfigured || ollamaReachable),
       apiKeyLoaded: Boolean(providerStatus.anthropicConfigured || providerStatus.openaiConfigured),
       agentsRunning: agentManager.getRunningCount(),
@@ -709,7 +751,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
   }
 
   if (is('/api/sandbox/info', 'GET')) {
-    return json(res, 200, await sandbox.getSandboxInfo());
+    return json(res, 200, await sandbox.getSandboxInfo(providerConfig.sandboxProvider));
   }
   if (is('/api/privacy', 'GET')) {
     const providerStatus = getProviderStatus(providerConfig);
@@ -727,6 +769,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
         localConfigured: providerStatus.localConfigured,
         slackConfigured: providerStatus.slackConfigured,
         githubWebhookConfigured: providerStatus.githubWebhookConfigured,
+        sandboxProvider: providerStatus.sandboxProvider || providerConfig.sandboxProvider || 'auto',
       },
       auth: {
         configured: authStore.isConfigured(),
@@ -743,7 +786,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
   }
   if (is('/api/sandbox/assess', 'POST')) {
     try {
-      return json(res, 200, await sandbox.assessCommand(body.command, projectRoot));
+      return json(res, 200, await sandbox.assessCommand(body.command, projectRoot, { providerPreference: providerConfig.sandboxProvider }));
     } catch (err) {
       return json(res, 400, { error: err.message });
     }
@@ -900,6 +943,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
         description: body.description || `Edit ${path.basename(body.filePath)}`,
         projectRoot,
         approvalContext: body.approvalContext || null,
+        actor: currentActor(auth),
       });
       return json(res, 200, pending.skipped ? { skipped: true } : strip(pending));
     } catch (err) { return json(res, 400, { error: err.message }); }
@@ -920,6 +964,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
           description: `Patch ${path.basename(proposal.filePath)}`,
           projectRoot,
           approvalContext: body.approvalContext || null,
+          actor: currentActor(auth),
         });
         if (!pending.skipped) created.push(strip(pending));
       }
@@ -952,9 +997,10 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
   const changeActionM = pathname.match(/^\/api\/changes\/([^/]+)\/(approve|reject|edit-approve)$/);
   if (changeActionM) {
     const [, id, action] = changeActionM;
-    if (action === 'approve')      return json(res, 200, await approvalQueue.approve(id));
-    if (action === 'reject')       return json(res, 200, approvalQueue.reject(id, body.reason));
-    if (action === 'edit-approve') return json(res, 200, await approvalQueue.editAndApprove(id, body.content));
+    const actor = currentActor(auth);
+    if (action === 'approve')      return json(res, 200, await approvalQueue.approve(id, actor));
+    if (action === 'reject')       return json(res, 200, approvalQueue.reject(id, body.reason, actor));
+    if (action === 'edit-approve') return json(res, 200, await approvalQueue.editAndApprove(id, body.content, actor));
   }
   const changeGithubReviewM = pathname.match(/^\/api\/changes\/([^/]+)\/github-review$/);
   if (changeGithubReviewM && method === 'POST') {
@@ -1449,6 +1495,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
         providers: resolvedProviders,
         policy,
         messages: hydratedMessages,
+        actor: currentActor(auth),
         signal: requestCtl.signal,
       });
       requestCtl.cleanup();
@@ -1527,6 +1574,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
         providers: resolvedProviders,
         policy,
         messages: hydratedMessages,
+        actor: currentActor(auth),
         signal: requestCtl.signal,
         onToken: (text) => sendEvent({ type: 'token', text }),
         onEvent: (evt) => {
@@ -1758,6 +1806,132 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
       limit: 8,
     }).summary);
   }
+  if (is('/api/collab/activity', 'GET')) {
+    const limit = Math.max(1, Number(q.limit) || 20);
+    const items = [
+      ...approvalQueue.getPending().map((change) => ({
+        id: `change:${change.id}`,
+        kind: change.type === 'review' ? 'review' : 'change',
+        title: change.description || change.summary || change.filePath || 'Pending change',
+        actor: change.proposedBy || change.resolvedBy || null,
+        createdAt: change.proposedAt || Date.now(),
+        status: change.status || 'pending',
+      })),
+      ...artifactStore.list(limit).map((artifact) => ({
+        id: `artifact:${artifact.id}`,
+        kind: 'artifact',
+        title: artifact.title || artifact.type || 'Artifact',
+        actor: artifact.createdBy || null,
+        createdAt: artifact.createdAt || Date.now(),
+        status: artifact.type || 'saved',
+      })),
+      ...turnTraceStore.listRecent(limit).map((turn) => ({
+        id: `turn:${turn.id}`,
+        kind: 'turn',
+        title: turn.meta?.userText ? String(turn.meta.userText).slice(0, 120) : 'Recent turn',
+        actor: turn.meta?.actor || null,
+        createdAt: turn.updatedAt || turn.createdAt || Date.now(),
+        status: turn.status || 'done',
+      })),
+    ].sort((a, b) => Number(new Date(b.createdAt || 0)) - Number(new Date(a.createdAt || 0))).slice(0, limit);
+    return json(res, 200, items);
+  }
+  if (is('/api/tunnel/status', 'GET')) {
+    return json(res, 200, tunnelManager.getStatus());
+  }
+  if (is('/api/tunnel', 'POST')) {
+    try {
+      if (body.action === 'stop') return json(res, 200, tunnelManager.stop());
+      if (body.action === 'configure') return json(res, 200, tunnelManager.configure(body || {}));
+      return json(res, 200, tunnelManager.start(body || {}));
+    } catch (err) {
+      return json(res, 400, { error: err.message });
+    }
+  }
+  if (is('/api/tunnel', 'DELETE')) {
+    return json(res, 200, tunnelManager.stop());
+  }
+  if (is('/api/delegation/targets', 'GET')) {
+    return json(res, 200, delegationRegistry.listTargets());
+  }
+  if (is('/api/delegation/targets', 'POST')) {
+    try {
+      return json(res, 200, { ok: true, target: delegationRegistry.createTarget(body || {}) });
+    } catch (err) {
+      return json(res, 400, { error: err.message });
+    }
+  }
+  const delegationTargetM = pathname.match(/^\/api\/delegation\/targets\/([^/]+)$/);
+  if (delegationTargetM) {
+    if (method === 'PATCH') {
+      try {
+        const target = delegationRegistry.updateTarget(delegationTargetM[1], body || {});
+        return target ? json(res, 200, { ok: true, target }) : json(res, 404, { error: 'Target not found' });
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+    if (method === 'DELETE') {
+      const result = delegationRegistry.removeTarget(delegationTargetM[1]);
+      return json(res, result.ok ? 200 : 404, result);
+    }
+  }
+  if (is('/api/delegation/dispatches', 'GET')) {
+    return json(res, 200, delegationRegistry.listDispatches(Number(q.limit) || 20));
+  }
+  if (is('/api/delegation/dispatch', 'POST')) {
+    try {
+      return json(res, 200, await delegationRegistry.dispatchTask(body.targetId, {
+        goal: body.goal,
+        role: body.role,
+        projectRoot,
+        requestedBy: currentActor(auth),
+        metadata: body.metadata || {},
+      }));
+    } catch (err) {
+      return json(res, 400, { error: err.message });
+    }
+  }
+  if (is('/api/delegation/execute', 'POST')) {
+    const verification = delegationRegistry.verifyIncoming(runtime.rawBody || JSON.stringify(body || {}), req.headers['x-clsclaw-delegation-key'], req.headers['x-clsclaw-signature']);
+    if (!verification.ok) return json(res, 401, { error: verification.error });
+    if (!body.goal) return json(res, 400, { error: 'goal required' });
+    const delegationArtifact = artifactStore.create({
+      type: 'delegation-request',
+      title: `Remote delegation: ${verification.target.name}`,
+      summary: String(body.goal || '').slice(0, 180),
+      projectRoot,
+      createdBy: { id: verification.target.id, username: verification.target.name, displayName: verification.target.name, role: 'remote' },
+      metadata: {
+        targetId: verification.target.id,
+        keyId: verification.target.keyId,
+        requestedBy: body.requestedBy || null,
+      },
+      content: JSON.stringify(body || {}, null, 2),
+    });
+    const resolvedProviders = resolveModelProviders(body.apiKey);
+    const contextFiles = await resolveContextFilesForTask(body.goal, resolvedProviders, {
+      maxFiles: 6,
+      maxTokens: 8000,
+    });
+    const agent = await agentManager.launch({
+      task: body.goal,
+      agentName: `Remote:${verification.target.name}`,
+      projectRoot,
+      apiKey: resolvedProviders,
+      contextFiles,
+      role: body.role || 'code',
+      memory: memoryStore.query(body.goal, { projectRoot }),
+      identityContext: getWorkspaceIdentityPrompt(),
+    });
+    return json(res, 200, {
+      ok: true,
+      accepted: true,
+      delegatedTo: verification.target.name,
+      artifactId: delegationArtifact.id,
+      agent: sa(agent),
+    });
+  }
   if (is('/api/artifacts', 'GET')) {
     return json(res, 200, artifactStore.list(Number(q.limit) || 40));
   }
@@ -1810,6 +1984,7 @@ async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
       title: `GitHub webhook: ${String(req.headers['x-github-event'] || 'event')}`,
       summary: [body?.action, body?.repository?.full_name, body?.sender?.login].filter(Boolean).join(' · ') || 'GitHub webhook delivery received',
       projectRoot,
+      createdBy: { id: 'system', username: 'github-webhook', displayName: 'GitHub Webhook', role: 'system' },
       content: JSON.stringify(body || {}, null, 2),
       metadata: {
         deliveryId: String(req.headers['x-github-delivery'] || ''),

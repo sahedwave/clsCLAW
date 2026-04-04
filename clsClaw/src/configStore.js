@@ -70,6 +70,7 @@ function resolveProviderConfig(preferred = {}) {
   const preferredEmbeddingProvider = firstDefined(input, ['embeddingProvider', 'semanticProvider']);
   const preferredSlackWebhookUrl = firstDefined(input, ['slackWebhookUrl']);
   const preferredGithubWebhookSecret = firstDefined(input, ['githubWebhookSecret']);
+  const preferredSandboxProvider = firstDefined(input, ['sandboxProvider']);
 
   return {
     anthropic: normalizeString(
@@ -118,6 +119,12 @@ function resolveProviderConfig(preferred = {}) {
       cfg.githubWebhookSecret ||
       process.env.GITHUB_WEBHOOK_SECRET
     ),
+    sandboxProvider: normalizeString(
+      preferredSandboxProvider !== undefined ? preferredSandboxProvider :
+      cfg.sandboxProvider ||
+      process.env.CLSCLAW_SANDBOX_PROVIDER ||
+      'auto'
+    ) || 'auto',
   };
 }
 
@@ -135,6 +142,7 @@ function getMaskedProviderConfig(preferred = {}) {
     slackConfigured: Boolean(resolved.slackWebhookUrl),
     githubWebhookSecret: maskApiKey(resolved.githubWebhookSecret),
     githubWebhookConfigured: Boolean(resolved.githubWebhookSecret),
+    sandboxProvider: resolved.sandboxProvider || 'auto',
   };
 }
 
@@ -156,6 +164,7 @@ function getProviderStatus(preferred = {}) {
     slackConfigured: Boolean(resolved.slackWebhookUrl),
     githubWebhookConfigured: Boolean(resolved.githubWebhookSecret),
     embeddingProvider: resolved.embeddingProvider || 'auto',
+    sandboxProvider: resolved.sandboxProvider || 'auto',
     llmConfigured: Boolean(resolved.anthropic || resolved.openai || localConfigured),
   };
 }

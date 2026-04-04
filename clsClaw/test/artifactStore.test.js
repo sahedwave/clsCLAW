@@ -19,6 +19,7 @@ test('artifact store persists and reloads saved artifacts', () => {
       content: '# Weekly coding report\n- src/server.js',
       projectRoot: '/tmp/demo',
       metadata: { highlights: ['src/server.js'] },
+      createdBy: { username: 'shahed', role: 'admin' },
     });
 
     assert.ok(artifact.id);
@@ -27,6 +28,7 @@ test('artifact store persists and reloads saved artifacts', () => {
 
     const loaded = store.get(artifact.id);
     assert.equal(loaded.title, 'Weekly coding report');
+    assert.equal(loaded.createdBy.username, 'shahed');
     assert.match(loaded.content, /src\/server\.js/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

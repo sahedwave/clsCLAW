@@ -27,6 +27,7 @@ class TurnTraceStore {
         role: meta.role || 'analyze',
         userText: String(meta.userText || ''),
         toolLoop: Boolean(meta.toolLoop),
+        actor: meta.actor && typeof meta.actor === 'object' ? { ...meta.actor } : null,
       },
       deliberation: meta.deliberation || null,
       governor: meta.governor || null,

@@ -19,6 +19,7 @@ class ArtifactStore {
     content = '',
     projectRoot = null,
     metadata = null,
+    createdBy = null,
   } = {}) {
     const id = randomUUID();
     const record = {
@@ -28,6 +29,7 @@ class ArtifactStore {
       summary: String(summary || '').trim(),
       projectRoot: projectRoot || null,
       metadata: metadata && typeof metadata === 'object' ? { ...metadata } : null,
+      createdBy: createdBy && typeof createdBy === 'object' ? { ...createdBy } : null,
       createdAt: Date.now(),
     };
     fs.writeFileSync(path.join(this._dir, `${id}.json`), JSON.stringify({
@@ -65,6 +67,9 @@ class ArtifactStore {
       metadata: patch.metadata && typeof patch.metadata === 'object'
         ? { ...(current.metadata || {}), ...patch.metadata }
         : current.metadata || null,
+      updatedBy: patch.updatedBy && typeof patch.updatedBy === 'object'
+        ? { ...patch.updatedBy }
+        : current.updatedBy || null,
     };
     fs.writeFileSync(path.join(this._dir, `${id}.json`), JSON.stringify(next), 'utf-8');
     const idx = this._index.findIndex((item) => item.id === id);
@@ -76,6 +81,7 @@ class ArtifactStore {
         summary: next.summary,
         projectRoot: next.projectRoot || null,
         metadata: next.metadata || null,
+        createdBy: next.createdBy || null,
         createdAt: next.createdAt,
       };
       this._saveIndex();

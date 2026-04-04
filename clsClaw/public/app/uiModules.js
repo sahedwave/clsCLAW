@@ -116,6 +116,7 @@
     pushRow('Verification', metadata.verificationStatus);
     pushRow('Evidence', metadata.evidenceStatus);
     pushRow('Approval required', metadata.approvalRequired ? 'yes' : '');
+    pushRow('Created by', metadata.createdBy);
     pushRow('Project root', metadata.projectRoot ? shortPath(metadata.projectRoot) : '');
     return rows.length ? `
       <div style="margin-top:10px">

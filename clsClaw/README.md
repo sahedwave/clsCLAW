@@ -33,6 +33,12 @@ node --test
 # or: npm test
 ```
 
+## Product Docs
+
+- [FEATURES.md](FEATURES.md) — complete user-facing feature and capability inventory
+- [COMPARE.md](COMPARE.md) — where `clsClaw` is stronger, weaker, and different from other agent products
+- [VISION.md](VISION.md) — founder-style product vision and design principles
+
 ---
 
 ## What is actually implemented
@@ -100,11 +106,17 @@ node --test
 ### Local auth (`src/auth/authStore.js`)
 - Local username/password auth with scrypt-hashed passwords and persistent sessions.
 - First-run bootstrap creates the local admin account.
-- Additional local users can be created through the auth API.
+- Additional local users can be created, disabled, and managed through the auth API and settings UI.
+- Turn reports, approvals, and artifacts now carry local actor attribution for operator activity.
 
 ### Slack integration (`src/connectors/connectorManager.js`)
 - Built-in Slack connector supports posting to a configured incoming webhook.
 - Requires outbound network access and a Slack webhook URL.
+
+### Tunnel + remote delegation (`src/remote/*.js`)
+- Built-in tunnel manager can start `cloudflared` or `ngrok` locally when installed, then surface the public URL into the GitHub webhook workflow.
+- Built-in remote delegation registry can store signed remote clsClaw targets and dispatch tasks to `/api/delegation/execute`.
+- These features work in the app, but still depend on installed tunnel binaries or reachable remote clsClaw instances.
 
 ### Live updates (`src/sse.js`)
 - Server-Sent Events replace WebSocket — no `ws` package needed.
@@ -116,10 +128,10 @@ node --test
 
 | Feature | Reason |
 |---------|--------|
-| True VM sandbox | clsClaw uses Docker/restricted sandboxing today, not VM isolation like Firecracker/gVisor |
-| Direct internet webhook delivery | GitHub or Slack can reach clsClaw only if your machine has a public URL or tunnel |
-| Full multi-user collaboration UX | Local auth/users exist, but the app is still optimized around one operator workspace |
-| Cloud task delegation | By definition requires cloud |
+| True VM sandbox | clsClaw supports restricted, Docker, and optional gVisor-style container isolation; true microVM isolation still requires an external runtime stack |
+| Direct internet webhook delivery | clsClaw can manage a local tunnel when `cloudflared` or `ngrok` is installed, but inbound internet delivery still depends on that external tunnel/provider |
+| Full multi-user collaboration UX | Local users, attribution, and admin controls exist, but the app is still not a full concurrent shared workspace with presence/conflict UX |
+| Cloud task delegation | clsClaw supports signed remote delegation to other reachable clsClaw instances, but actual cloud execution still requires remote infrastructure |
 
 ---
 
