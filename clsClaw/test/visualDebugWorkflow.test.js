@@ -35,8 +35,14 @@ test('visual debug workflow ties screenshot evidence to files and docs', () => {
   });
 
   assert.equal(workflow.confidence, 'grounded');
+  assert.equal(workflow.statusLabel, 'grounded visual diagnosis');
   assert.match(workflow.primaryIssue, /submit button is clipped/i);
   assert.equal(workflow.relatedFiles[0].file, 'src/components/LoginForm.jsx');
   assert.equal(workflow.docSources[0].domain, 'react.dev');
   assert.match(workflow.nextSteps.join('\n'), /login modal|dialog/i);
+  assert.equal(workflow.coverage.visuals, 1);
+  assert.equal(workflow.coverage.files, 1);
+  assert.equal(workflow.coverage.docs, 1);
+  assert.equal(workflow.debugLane[0].stage, 'Observe');
+  assert.match(workflow.debugLane[3].detail, /Re-check the login modal/i);
 });

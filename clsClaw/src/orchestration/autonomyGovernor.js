@@ -1,6 +1,7 @@
 'use strict';
 
 const { summarizeEvidenceBundle } = require('./evidenceBundle');
+const { normalizeExecutionProfile } = require('./executionProfiles');
 
 function evaluateAutonomy({
   policy = {},
@@ -14,10 +15,16 @@ function evaluateAutonomy({
   const evidenceDemand = deliberation.evidenceDemand || 'low';
   const autonomyAllowance = deliberation.autonomyAllowance || 'full';
   const executionProfile = deliberation.executionProfile || policy.executionProfile?.id || policy.profile || 'deliberate';
+  const profile = normalizeExecutionProfile(executionProfile);
   const evidenceStatus = classifyEvidenceStatus(evidenceBundle);
   const evidenceSufficientNow = evidenceStatus === 'grounded' || evidenceStatus === 'strong';
   const evidenceCategoryCount = Object.values(evidenceBundle?.byCategory || {}).filter((count) => Number(count) > 0).length;
   const reasons = [...(deliberation.reasons || [])];
+  const budgetStatus = evaluateBudget({
+    profile,
+    trace,
+    deliberation,
+  });
 
   if (deliberation.inspectFirst && evidenceStatus === 'none') {
     reasons.push('no grounded evidence has been collected yet');
@@ -31,6 +38,15 @@ function evaluateAutonomy({
   }
   if (risk === 'high' && deliberation.approvalSensitive) {
     reasons.push('the task carries higher execution risk');
+  }
+  if (budgetStatus.exceeded) {
+    reasons.push(budgetStatus.reason);
+  }
+  if (deliberation.externalActionRequested) {
+    reasons.push('the request includes an external side effect');
+  }
+  if (deliberation.hostSensitiveAction) {
+    reasons.push('the request may require host-level execution or network access');
   }
 
   const shouldAskUser = Boolean(deliberation.askUserFirst);
@@ -50,6 +66,10 @@ function evaluateAutonomy({
   );
   const shouldPauseForApproval = Boolean(
     pendingDecision?.type === 'await_approval'
+    || budgetStatus.exceeded
+    || deliberation.externalActionRequested
+    || deliberation.hostSensitiveAction
+    || (deliberation.writeScope === 'repo_wide' && pendingDecision?.type !== 'ask')
     || (deliberation.approvalSensitive && risk === 'high' && pendingDecision?.type === 'final')
   );
 
@@ -77,6 +97,8 @@ function evaluateAutonomy({
     evidenceDemand,
     autonomyAllowance,
     executionProfile,
+    budget: budgetStatus,
+    writeScope: deliberation.writeScope || 'single_file',
     pendingDecisionType: pendingDecision?.type || null,
     reasons: uniqueStrings(reasons),
     approvalContext: buildApprovalContext({
@@ -87,6 +109,7 @@ function evaluateAutonomy({
       pendingDecision,
       evidenceStatus,
       reasons,
+      budgetStatus,
     }),
   };
 }
@@ -100,6 +123,7 @@ function buildApprovalContext({
   evidenceStatus = null,
   reasons = [],
   kind = null,
+  budgetStatus = null,
 } = {}) {
   const required = Boolean(
     pendingDecision?.type === 'await_approval'
@@ -129,6 +153,11 @@ function buildApprovalContext({
     verificationPlan,
     autonomyAllowance: deliberation.autonomyAllowance || 'full',
     risk: deliberation.risk || 'low',
+    writeScope: deliberation.writeScope || 'single_file',
+    nextStep: pendingDecision?.type || null,
+    budget: budgetStatus,
+    externalActionRequested: Boolean(deliberation.externalActionRequested),
+    hostSensitiveAction: Boolean(deliberation.hostSensitiveAction),
   };
 }
 
@@ -166,6 +195,9 @@ function buildVerificationPlan(policy = {}, deliberation = {}, trace = null) {
   if (policy.intent === 'build' || policy.mode === 'build') {
     parts.push('review the patch or diff scope after approval');
   }
+  if (deliberation.externalActionRequested) {
+    parts.push('confirm the external side effect target before execution');
+  }
   return parts.length ? parts.join('; ') : 'review the proposed action and verify the resulting scope after approval';
 }
 
@@ -174,7 +206,63 @@ function buildApprovalSummary({ policy = {}, approvalKind, evidenceBundle = null
   const nextStep = pendingDecision?.message ? String(pendingDecision.message).trim() : '';
   const prefix = nextStep || `The next step for "${task}" should wait for approval.`;
   const evidence = evidenceBundle?.summary || summarizeEvidenceBundle(evidenceBundle);
-  return `${prefix} Risk level is ${String(policy.risk || '').trim() || 'elevated'} and the current evidence is ${evidenceStatus}. ${evidence}`;
+  return `${prefix} Current evidence is ${evidenceStatus}. ${evidence}`;
+}
+
+function evaluateBudget({ profile, trace = null, deliberation = {} } = {}) {
+  const budget = profile?.autonomyBudget || {};
+  const toolSteps = (trace?.steps || []).filter((step) => step.kind === 'tool_result' || step.kind === 'tool_error').length;
+  const recoveryPasses = Number(trace?.plan?.failures || 0);
+  const writeScope = deliberation.writeScope || 'single_file';
+  const scopeRank = { single_file: 1, bounded_multi_file: 2, multi_file: 2, repo_wide: 3 };
+  const maxScopeRank = scopeRank[budget.maxWriteScope || 'bounded_multi_file'] || 2;
+  const currentScopeRank = scopeRank[writeScope] || 1;
+
+  if (Number.isFinite(budget.maxToolSteps) && toolSteps >= budget.maxToolSteps) {
+    return {
+      exceeded: true,
+      reason: `the ${profile.id} autonomy budget for tool steps has been reached`,
+      toolSteps,
+      maxToolSteps: budget.maxToolSteps,
+      recoveryPasses,
+      maxRecoveryPasses: budget.maxRecoveryPasses ?? 0,
+      writeScope,
+      maxWriteScope: budget.maxWriteScope || 'bounded_multi_file',
+    };
+  }
+  if (Number.isFinite(budget.maxRecoveryPasses) && recoveryPasses > budget.maxRecoveryPasses) {
+    return {
+      exceeded: true,
+      reason: `the ${profile.id} autonomy budget for recovery passes has been reached`,
+      toolSteps,
+      maxToolSteps: budget.maxToolSteps ?? null,
+      recoveryPasses,
+      maxRecoveryPasses: budget.maxRecoveryPasses,
+      writeScope,
+      maxWriteScope: budget.maxWriteScope || 'bounded_multi_file',
+    };
+  }
+  if (currentScopeRank > maxScopeRank) {
+    return {
+      exceeded: true,
+      reason: `the requested write scope exceeds the ${profile.id} profile budget`,
+      toolSteps,
+      maxToolSteps: budget.maxToolSteps ?? null,
+      recoveryPasses,
+      maxRecoveryPasses: budget.maxRecoveryPasses ?? 0,
+      writeScope,
+      maxWriteScope: budget.maxWriteScope || 'bounded_multi_file',
+    };
+  }
+  return {
+    exceeded: false,
+    toolSteps,
+    maxToolSteps: budget.maxToolSteps ?? null,
+    recoveryPasses,
+    maxRecoveryPasses: budget.maxRecoveryPasses ?? 0,
+    writeScope,
+    maxWriteScope: budget.maxWriteScope || 'bounded_multi_file',
+  };
 }
 
 function uniqueStrings(items = []) {

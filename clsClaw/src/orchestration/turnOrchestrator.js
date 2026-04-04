@@ -23,11 +23,13 @@ class TurnOrchestrator extends EventEmitter {
     modelRouter,
     toolRuntime,
     traceStore,
+    artifactStore = null,
   } = {}) {
     super();
     this._modelRouter = modelRouter;
     this._toolRuntime = toolRuntime;
     this._traceStore = traceStore;
+    this._artifactStore = artifactStore;
   }
 
   async runTurn({
@@ -120,6 +122,12 @@ class TurnOrchestrator extends EventEmitter {
       executionProfile: executionProfile.id,
       approvalRequired: governor.shouldPauseForApproval,
     });
+    this._traceStore.updateVerification(turn.id, {
+      required: Boolean(deliberation.needsVerification),
+      performed: false,
+      status: deliberation.needsVerification ? 'pending' : 'not_required',
+      notes: [],
+    });
 
     try {
       if (deliberation.askUserFirst) {
@@ -150,6 +158,10 @@ class TurnOrchestrator extends EventEmitter {
           completedUnits: 1,
           nextAction: 'final answer ready',
           confidence: 0.92,
+        });
+        this._traceStore.updateVerification(turn.id, {
+          performed: false,
+          status: deliberation.needsVerification ? 'pending' : 'not_required',
         });
         governor = syncGovernor({ type: 'final' });
       } else {
@@ -378,6 +390,17 @@ class TurnOrchestrator extends EventEmitter {
         }
       }
 
+      const artifactRecord = createTurnArtifact({
+        artifactStore: this._artifactStore,
+        turn: this._traceStore.getTurn(turn.id),
+        policy,
+        finalAnswer,
+        usedTools,
+      });
+      if (artifactRecord) {
+        this._traceStore.attachArtifact(turn.id, artifactRecord);
+      }
+
       this._traceStore.finalizeTurn(turn.id, {
         status: 'done',
         final: {
@@ -385,6 +408,7 @@ class TurnOrchestrator extends EventEmitter {
           model: finalModel,
           usedTools,
           answerPreview: String(finalAnswer || '').slice(0, 200),
+          artifactId: artifactRecord?.id || null,
         },
       });
       emit('trace_done', {
@@ -565,6 +589,9 @@ function summarizeTrace(trace) {
   if (trace.plan) {
     lines.push(`plan phase=${trace.plan.phase} next=${trace.plan.nextAction} completed=${trace.plan.completedUnits || 0}/${trace.plan.totalUnits || 0}`);
   }
+  if (trace.verification) {
+    lines.push(`verification status=${trace.verification.status} performed=${trace.verification.performed ? 'yes' : 'no'}`);
+  }
   for (const step of trace.steps || []) {
     if (step.kind === 'tool') {
       lines.push(`planned tool ${step.tool} args=${JSON.stringify(step.args || {})} reason=${step.reason || ''}`);
@@ -580,6 +607,43 @@ function summarizeTrace(trace) {
     lines.push(`evidence ${evidence.type} ${evidence.source}: ${String(evidence.snippet || '').slice(0, 120)}`);
   }
   return lines.length ? lines.join('\n') : 'No tool activity yet.';
+}
+
+function createTurnArtifact({ artifactStore, turn, policy, finalAnswer, usedTools }) {
+  if (!artifactStore || !turn) return null;
+  const verification = turn.verification || null;
+  const approval = turn.governor?.approvalContext || null;
+  if (!(usedTools || approval || verification?.required)) return null;
+  return artifactStore.create({
+    type: 'turn-report',
+    title: `Turn report · ${String(policy.intent || policy.mode || 'chat')}`,
+    summary: [
+      turn.governor?.evidenceStatus ? `evidence=${turn.governor.evidenceStatus}` : '',
+      approval?.kind ? `approval=${approval.kind}` : '',
+      verification?.status ? `verification=${verification.status}` : '',
+      turn.plan?.phase ? `phase=${turn.plan.phase}` : '',
+    ].filter(Boolean).join(' · '),
+    metadata: {
+      turnId: turn.id,
+      intent: policy.intent || null,
+      mode: policy.mode || null,
+      profile: turn.meta?.profile || null,
+      evidenceStatus: turn.governor?.evidenceStatus || null,
+      verificationStatus: verification?.status || null,
+      approvalRequired: Boolean(turn.governor?.shouldPauseForApproval),
+    },
+    content: JSON.stringify({
+      userText: turn.meta?.userText || '',
+      finalAnswer: String(finalAnswer || ''),
+      deliberation: turn.deliberation || null,
+      governor: turn.governor || null,
+      plan: turn.plan || null,
+      verification: verification || null,
+      evidenceBundle: turn.evidenceBundle || null,
+      evidence: turn.evidence || [],
+      steps: turn.steps || [],
+    }, null, 2),
+  });
 }
 
 function parsePlannerDecision(text) {
@@ -760,6 +824,13 @@ async function runToolStep({
       completedUnits: Math.min(totalUnits || MAX_STEPS, stepNumber),
       nextAction: 'evaluate evidence and decide next step',
     });
+    if (phase === 'verify') {
+      traceStore.updateVerification(turnId, {
+        performed: true,
+        status: result.ok === false ? 'failed' : 'passed',
+        notes: [String(result.summary || `Verification completed with ${toolName}`).trim()].filter(Boolean),
+      });
+    }
     return stepNumber + 1;
   } catch (err) {
     traceStore.appendStep(turnId, {
@@ -780,6 +851,13 @@ async function runToolStep({
       failures: (traceStore.getTurn(turnId)?.plan?.failures || 0) + 1,
       nextAction: `recover after ${toolName} failure`,
     });
+    if (phase === 'verify') {
+      traceStore.updateVerification(turnId, {
+        performed: true,
+        status: 'failed',
+        notes: [String(err.message || `Verification failed in ${toolName}`).trim()].filter(Boolean),
+      });
+    }
     throw err;
   }
 }

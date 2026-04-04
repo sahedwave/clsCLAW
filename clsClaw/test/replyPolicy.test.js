@@ -58,6 +58,18 @@ test('detectIntent routes repository deep dives to repo_analysis', () => {
   }), 'repo_analysis');
 });
 
+test('detectIntent respects slash workflow directives', () => {
+  assert.equal(detectIntent({
+    mode: 'ask',
+    messages: [{ role: 'user', content: '/review inspect this change for bugs' }],
+  }), 'review');
+
+  assert.equal(detectIntent({
+    mode: 'ask',
+    messages: [{ role: 'user', content: '/fix tighten auth handling' }],
+  }), 'build');
+});
+
 test('intentToRole maps chat to analyze and build to code', () => {
   assert.equal(intentToRole('chat'), 'analyze');
   assert.equal(intentToRole('build'), 'code');

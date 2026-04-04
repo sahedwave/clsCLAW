@@ -99,3 +99,39 @@ test('autonomy governor avoids extra verify loop when strong multi-source eviden
   assert.equal(result.shouldVerifyBeforeFinal, false);
   assert.equal(result.phaseDirective, 'continue');
 });
+
+test('autonomy governor pauses when the execution profile budget is exceeded', () => {
+  const result = evaluateAutonomy({
+    policy: { intent: 'build', mode: 'build', profile: 'quick', userText: 'refactor the entire project' },
+    deliberation: {
+      inspectFirst: true,
+      askUserFirst: false,
+      approvalSensitive: true,
+      needsVerification: true,
+      evidenceSufficient: true,
+      evidenceDemand: 'medium',
+      risk: 'medium',
+      ambiguity: 'low',
+      autonomyAllowance: 'bounded',
+      executionProfile: 'quick',
+      writeScope: 'repo_wide',
+      reasons: [],
+    },
+    trace: {
+      steps: [
+        { kind: 'tool_result' },
+        { kind: 'tool_result' },
+        { kind: 'tool_result' },
+      ],
+      plan: { failures: 0 },
+    },
+    evidenceBundle: buildEvidenceBundle([
+      { type: 'workspace', source: 'src/app.js', title: 'app', snippet: '...' },
+    ]),
+    pendingDecision: { type: 'final' },
+  });
+
+  assert.equal(result.phaseDirective, 'await_approval');
+  assert.equal(result.budget.exceeded, true);
+  assert.match(result.approvalContext.summary, /wait for approval/i);
+});

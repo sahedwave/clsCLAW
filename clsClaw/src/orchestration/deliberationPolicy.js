@@ -3,10 +3,11 @@
 const { normalizeExecutionProfile } = require('./executionProfiles');
 
 function classifyDeliberation({ policy = {}, messages = [], trace = null } = {}) {
+  const workflowDirective = extractWorkflowDirective(policy.userText || extractUserText(messages));
   const intent = String(policy.intent || 'chat');
   const mode = String(policy.mode || 'ask');
   const executionProfile = normalizeExecutionProfile(policy.executionProfile || policy.profile);
-  const userText = String(policy.userText || '').trim();
+  const userText = String(stripWorkflowDirective(policy.userText || '')).trim();
   const text = userText.toLowerCase();
   const hasImages = containsImages(messages);
   const currentEvidenceCount = Array.isArray(trace?.evidence) ? trace.evidence.length : 0;
@@ -22,6 +23,9 @@ function classifyDeliberation({ policy = {}, messages = [], trace = null } = {})
   let evidenceDemandScore = 0;
   let verificationNeed = 'low';
   let autonomyAllowance = 'full';
+  const writeScope = estimateWriteScope(text);
+  const externalActionRequested = /\b(email|calendar|telegram|discord|whatsapp|post|publish|deploy|upload|message|notify|submit|payment|checkout)\b/.test(text);
+  const hostSensitiveAction = /\b(docker|curl|wget|open|osascript|xdg-open|browser|gh\b|ssh)\b/.test(text);
 
   if (['build', 'review', 'test'].includes(intent) || mode === 'build') {
     riskScore += 2;
@@ -72,6 +76,22 @@ function classifyDeliberation({ policy = {}, messages = [], trace = null } = {})
     riskScore += 1;
     reasons.push('user asked for immediate execution');
   }
+  if (externalActionRequested) {
+    riskScore += 2;
+    evidenceDemandScore += 1;
+    reasons.push('external side effects requested');
+  }
+  if (hostSensitiveAction) {
+    riskScore += 2;
+    reasons.push('host or network sensitive action implied');
+  }
+  if (writeScope === 'repo_wide') {
+    riskScore += 2;
+    reasons.push('request implies broad write scope');
+  } else if (writeScope === 'multi_file') {
+    riskScore += 1;
+    reasons.push('request implies multi-file changes');
+  }
 
   if (['repo_analysis', 'review', 'build', 'test', 'docs', 'plan'].includes(intent) || hasImages) {
     evidenceDemandScore = Math.max(0, evidenceDemandScore + Number(executionProfile.inspectBias || 0));
@@ -97,11 +117,14 @@ function classifyDeliberation({ policy = {}, messages = [], trace = null } = {})
   if (riskScore >= 3 || intent === 'review') {
     autonomyAllowance = 'bounded';
   }
+  if (externalActionRequested || hostSensitiveAction || writeScope === 'repo_wide') {
+    autonomyAllowance = 'approval_first';
+  }
   if (ambiguityScore >= 2 && ['build', 'review', 'plan'].includes(intent)) {
     autonomyAllowance = 'clarify_if_blocked';
   }
 
-  const approvalSensitive = riskScore >= 3 || /\b(delete|remove|install|upgrade|run)\b/.test(text) || mode === 'build';
+  const approvalSensitive = riskScore >= 3 || /\b(delete|remove|install|upgrade|run)\b/.test(text) || mode === 'build' || externalActionRequested || hostSensitiveAction;
   const needsVerification = verificationNeed === 'high' || (verificationNeed === 'medium' && riskScore >= 2) || /\b(test|verify|check)\b/.test(text);
   const askUserFirst = ambiguityScore >= 2
     && !hasGroundedEvidence
@@ -123,6 +146,11 @@ function classifyDeliberation({ policy = {}, messages = [], trace = null } = {})
     ambiguity: ambiguityScore >= 3 ? 'high' : ambiguityScore >= 1 ? 'medium' : 'low',
     autonomyAllowance,
     executionProfile: executionProfile.id,
+    autonomyBudget: executionProfile.autonomyBudget || null,
+    workflowDirective,
+    writeScope,
+    externalActionRequested,
+    hostSensitiveAction,
     initialPhase: askUserFirst
       ? 'ask'
       : inspectFirst && !evidenceSufficient
@@ -132,6 +160,30 @@ function classifyDeliberation({ policy = {}, messages = [], trace = null } = {})
           : 'final',
     reasons,
   };
+}
+
+function extractWorkflowDirective(text = '') {
+  const raw = String(text || '').trim();
+  const match = raw.match(/^\/([a-z][a-z0-9_-]*)\b/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
+function stripWorkflowDirective(text = '') {
+  return String(text || '').replace(/^\/[a-z][a-z0-9_-]*\b\s*/i, '');
+}
+
+function extractUserText(messages = []) {
+  const lastUser = [...messages].reverse().find((msg) => msg?.role === 'user');
+  if (!lastUser) return '';
+  return Array.isArray(lastUser.content)
+    ? lastUser.content.map((part) => part?.text || '').join('\n')
+    : String(lastUser.content || '');
+}
+
+function estimateWriteScope(text = '') {
+  if (/\b(repo-wide|whole repo|entire repo|all files|every file|entire project|across the project)\b/.test(text)) return 'repo_wide';
+  if (/\b(multi-file|multiple files|several files|across files|across modules|refactor)\b/.test(text)) return 'multi_file';
+  return 'single_file';
 }
 
 function countEvidenceTypes(items = [], types = []) {
@@ -147,4 +199,6 @@ function containsImages(messages = []) {
 
 module.exports = {
   classifyDeliberation,
+  extractWorkflowDirective,
+  stripWorkflowDirective,
 };

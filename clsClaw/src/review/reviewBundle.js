@@ -21,6 +21,7 @@ function buildReviewBundle({
   const topExternalSources = collectExternalSources(result, evidenceBundle);
   const topVisualEvidence = collectVisualEvidence(result, evidenceBundle);
   const groundingHighlights = collectGroundingHighlights(evidenceBundle, topExternalSources, topVisualEvidence);
+  const sourceReferences = buildSourceReferences({ affectedFiles, topExternalSources, topVisualEvidence, evidenceBundle });
   const visualDebug = buildVisualDebugWorkflow({
     result,
     evidenceBundle,
@@ -52,6 +53,7 @@ function buildReviewBundle({
       groundingHighlights,
       topExternalSources,
       topVisualEvidence,
+      sourceReferences,
     },
     github: {
       synced: Boolean(githubReview),
@@ -69,6 +71,7 @@ function buildReviewBundle({
       verificationPlan: approvalContext.verificationPlan || '',
     } : null,
     verificationNotes,
+    auditTrail: buildAuditTrail({ approvalContext, githubReview, visualDebug, verificationNotes }),
     visualDebug,
     fixSuggestions: buildFixSuggestions({
       generalFindings,
@@ -79,6 +82,40 @@ function buildReviewBundle({
       topExternalSources,
     }),
   };
+}
+
+function buildSourceReferences({ affectedFiles = [], topExternalSources = [], topVisualEvidence = [], evidenceBundle = null } = {}) {
+  const refs = [];
+  for (const file of affectedFiles.slice(0, 5)) {
+    refs.push({
+      kind: 'workspace',
+      label: file.file,
+      detail: `${file.inlineComments} inline · ${file.findings} finding${file.findings === 1 ? '' : 's'}`,
+    });
+  }
+  for (const source of topExternalSources.slice(0, 3)) {
+    refs.push({
+      kind: 'external',
+      label: source.title,
+      detail: source.url,
+      url: source.url,
+    });
+  }
+  for (const visual of topVisualEvidence.slice(0, 2)) {
+    refs.push({
+      kind: 'visual',
+      label: visual.title,
+      detail: visual.citationId || visual.snippet || 'visual evidence',
+    });
+  }
+  if (!refs.length && evidenceBundle?.summary) {
+    refs.push({
+      kind: 'summary',
+      label: 'evidence summary',
+      detail: evidenceBundle.summary,
+    });
+  }
+  return refs.slice(0, 8);
 }
 
 function collectExternalSources(result = {}, evidenceBundle = null) {
@@ -244,7 +281,7 @@ function buildFixSuggestions({
         ? `${file}${Number.isFinite(line) ? ` around line ${line}` : ''}`
         : 'Review the linked finding context.',
       kind: 'finding',
-      confidence: visualDebug?.confidence === 'grounded' ? 'grounded' : 'local',
+      confidence: visualDebug?.confidence === 'grounded' || topExternalSources.length ? 'grounded' : 'local',
     });
   }
 
@@ -287,6 +324,27 @@ function buildFixSuggestions({
   }
 
   return suggestions.slice(0, 5);
+}
+
+function buildAuditTrail({ approvalContext = null, githubReview = null, visualDebug = null, verificationNotes = [] } = {}) {
+  const steps = [];
+  if (approvalContext?.summary) {
+    steps.push({ label: 'Approval', detail: approvalContext.summary });
+  }
+  if (visualDebug?.summary) {
+    steps.push({ label: 'Visual grounding', detail: visualDebug.summary });
+  }
+  if (verificationNotes.length) {
+    steps.push({ label: 'Verification', detail: verificationNotes[0] });
+  }
+  if (githubReview?.url) {
+    steps.push({
+      label: 'GitHub',
+      detail: `${githubReview.owner}/${githubReview.repo}#${githubReview.pullNumber}`,
+      url: githubReview.url,
+    });
+  }
+  return steps;
 }
 
 function uniqueStrings(items = []) {

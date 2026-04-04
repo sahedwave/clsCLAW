@@ -56,6 +56,33 @@ class ArtifactStore {
     }
   }
 
+  update(id, patch = {}) {
+    const current = this.get(id);
+    if (!current) return null;
+    const next = {
+      ...current,
+      ...patch,
+      metadata: patch.metadata && typeof patch.metadata === 'object'
+        ? { ...(current.metadata || {}), ...patch.metadata }
+        : current.metadata || null,
+    };
+    fs.writeFileSync(path.join(this._dir, `${id}.json`), JSON.stringify(next), 'utf-8');
+    const idx = this._index.findIndex((item) => item.id === id);
+    if (idx >= 0) {
+      this._index[idx] = {
+        id: next.id,
+        type: next.type,
+        title: next.title,
+        summary: next.summary,
+        projectRoot: next.projectRoot || null,
+        metadata: next.metadata || null,
+        createdAt: next.createdAt,
+      };
+      this._saveIndex();
+    }
+    return next;
+  }
+
   _loadIndex() {
     try {
       if (fs.existsSync(this._indexFile)) {

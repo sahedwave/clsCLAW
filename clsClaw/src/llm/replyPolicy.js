@@ -1,6 +1,7 @@
 'use strict';
 
 const { normalizeExecutionProfile } = require('../orchestration/executionProfiles');
+const { extractWorkflowDirective, stripWorkflowDirective } = require('../orchestration/deliberationPolicy');
 
 const CANONICAL_FACTS = {
   productName: 'clsClaw',
@@ -27,7 +28,7 @@ function extractUserIntentText(messages = []) {
   const content = Array.isArray(lastUser.content)
     ? lastUser.content.map((part) => part?.text || '').join('\n')
     : String(lastUser.content || '');
-  return content.split('\n\nCONTEXT:\n')[0].trim();
+  return stripWorkflowDirective(content.split('\n\nCONTEXT:\n')[0].trim());
 }
 
 function hasAttachedContext(messages = []) {
@@ -41,8 +42,21 @@ function hasAttachedContext(messages = []) {
 
 function detectIntent({ messages = [], mode = 'ask' } = {}) {
   const normalizedMode = normalizeMode(mode);
+  const lastUser = [...messages].reverse().find((msg) => msg?.role === 'user');
+  const rawContent = lastUser
+    ? Array.isArray(lastUser.content)
+      ? lastUser.content.map((part) => part?.text || '').join('\n')
+      : String(lastUser.content || '')
+    : '';
   const userText = extractUserIntentText(messages);
   const text = userText.toLowerCase();
+  const directive = extractWorkflowDirective(rawContent || userText);
+
+  if (directive === 'review') return 'review';
+  if (directive === 'fix' || directive === 'build') return 'build';
+  if (directive === 'verify' || directive === 'test') return 'test';
+  if (directive === 'debug-ui') return 'build';
+  if (directive === 'brief') return 'plan';
 
   if (/\b(repository|repo|codebase|github|compare repos|compare repositories|surgical analysis|deep dive)\b/.test(text)) {
     return 'repo_analysis';

@@ -77,3 +77,19 @@ test('deliberation policy records the selected execution profile', () => {
   assert.equal(result.executionProfile, 'parallel');
   assert.equal(result.inspectFirst, true);
 });
+
+test('deliberation policy treats external actions as approval-first and captures write scope', () => {
+  const result = classifyDeliberation({
+    policy: {
+      intent: 'build',
+      mode: 'build',
+      userText: 'post the update to Discord and refactor multiple files',
+    },
+    messages: [{ role: 'user', content: 'post the update to Discord and refactor multiple files' }],
+  });
+
+  assert.equal(result.approvalSensitive, true);
+  assert.equal(result.autonomyAllowance, 'approval_first');
+  assert.equal(result.writeScope, 'multi_file');
+  assert.equal(result.externalActionRequested, true);
+});

@@ -11,6 +11,11 @@ const EXECUTION_PROFILES = {
     askBias: 0,
     maxSteps: 4,
     allowParallel: false,
+    autonomyBudget: {
+      maxToolSteps: 3,
+      maxRecoveryPasses: 0,
+      maxWriteScope: 'single_file',
+    },
   },
   deliberate: {
     id: 'deliberate',
@@ -22,6 +27,11 @@ const EXECUTION_PROFILES = {
     askBias: 0,
     maxSteps: 7,
     allowParallel: false,
+    autonomyBudget: {
+      maxToolSteps: 5,
+      maxRecoveryPasses: 1,
+      maxWriteScope: 'bounded_multi_file',
+    },
   },
   execute: {
     id: 'execute',
@@ -33,6 +43,11 @@ const EXECUTION_PROFILES = {
     askBias: -1,
     maxSteps: 7,
     allowParallel: false,
+    autonomyBudget: {
+      maxToolSteps: 6,
+      maxRecoveryPasses: 1,
+      maxWriteScope: 'bounded_multi_file',
+    },
   },
   parallel: {
     id: 'parallel',
@@ -44,6 +59,11 @@ const EXECUTION_PROFILES = {
     askBias: 0,
     maxSteps: 8,
     allowParallel: true,
+    autonomyBudget: {
+      maxToolSteps: 6,
+      maxRecoveryPasses: 1,
+      maxWriteScope: 'bounded_multi_file',
+    },
   },
 };
 

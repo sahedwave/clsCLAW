@@ -32,3 +32,27 @@ test('artifact store persists and reloads saved artifacts', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('artifact store can update existing artifact metadata and summary', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clsclaw-artifacts-update-'));
+  try {
+    const store = new ArtifactStore(root);
+    const artifact = store.create({
+      type: 'turn-report',
+      title: 'Turn report',
+      summary: 'Initial',
+      content: '{}',
+    });
+
+    const updated = store.update(artifact.id, {
+      summary: 'Updated summary',
+      metadata: { verificationStatus: 'passed' },
+    });
+
+    assert.equal(updated.summary, 'Updated summary');
+    assert.equal(updated.metadata.verificationStatus, 'passed');
+    assert.equal(store.get(artifact.id).summary, 'Updated summary');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

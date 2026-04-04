@@ -35,12 +35,14 @@ const { diffFileVsProposed, setVersionStore } = require('./diff/diff');
 const { materializePatchDocument } = require('./diff/patchProposal');
 const { ExtensionManager } = require('./extensions/extensionManager');
 const ConnectorManager = require('./connectors/connectorManager');
+const { McpRegistry } = require('./connectors/mcpRegistry');
 const { WebClient } = require('./web/webClient');
 const { ImageStore } = require('./media/imageStore');
 const { ArtifactStore } = require('./artifacts/artifactStore');
 const TurnTraceStore = require('./orchestration/turnTraceStore');
 const { ToolRuntime } = require('./orchestration/toolRuntime');
 const { TurnOrchestrator } = require('./orchestration/turnOrchestrator');
+const { buildCompanionFeed } = require('./remote/companionFeed');
 const VersionStore  = require('./versions/versionStore');
 const modelRouter   = require('./llm/modelRouter');
 const {
@@ -95,6 +97,12 @@ const connectorManager = new ConnectorManager({
   webClient,
   githubTokenGetter: () => githubToken,
 });
+const mcpRegistry = new McpRegistry({
+  dataFile: path.join(DATA_DIR, 'mcp', 'registry.json'),
+  connectorManager,
+  extensionManager,
+  githubTokenGetter: () => githubToken,
+});
 const imageStore = new ImageStore(path.join(DATA_DIR, 'uploads'));
 const artifactStore = new ArtifactStore(path.join(DATA_DIR, 'artifacts'));
 const turnTraceStore = new TurnTraceStore(path.join(DATA_DIR, 'turns'));
@@ -128,6 +136,7 @@ const turnOrchestrator = new TurnOrchestrator({
   modelRouter,
   toolRuntime,
   traceStore: turnTraceStore,
+  artifactStore,
 });
 
 setVersionStore(versionStore);
@@ -325,7 +334,7 @@ async function router(req, res) {
   const method   = req.method.toUpperCase();
 
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
@@ -348,7 +357,7 @@ async function router(req, res) {
   }
 
   let body = {};
-  if (method === 'POST' && req.headers['content-type']?.includes('application/json')) {
+  if ((method === 'POST' || method === 'PATCH' || method === 'DELETE') && req.headers['content-type']?.includes('application/json')) {
     body = await readBody(req);
   }
 
@@ -580,6 +589,14 @@ async function handleAPI(pathname, method, body, q, res, req) {
         ...providerStatus,
         ollamaReachable,
       },
+      localOwnership: {
+        projectRoot,
+        artifactsStoredLocally: artifactStore.list(1).length >= 0,
+        memoryStoredLocally: true,
+        approvalsStoredLocally: true,
+        remoteProvidersConfigured: Boolean(providerStatus.anthropicConfigured || providerStatus.openaiConfigured),
+        localModelConfigured: Boolean(providerStatus.localConfigured),
+      },
       llmReady: Boolean(providerStatus.anthropicConfigured || providerStatus.openaiConfigured || ollamaReachable),
       apiKeyLoaded: Boolean(providerStatus.anthropicConfigured || providerStatus.openaiConfigured),
       agentsRunning: agentManager.getRunningCount(),
@@ -596,6 +613,30 @@ async function handleAPI(pathname, method, body, q, res, req) {
 
   if (is('/api/sandbox/info', 'GET')) {
     return json(res, 200, await sandbox.getSandboxInfo());
+  }
+  if (is('/api/privacy', 'GET')) {
+    const providerStatus = getProviderStatus(providerConfig);
+    return json(res, 200, {
+      projectRoot,
+      storage: {
+        artifacts: path.join(DATA_DIR, 'artifacts'),
+        memory: path.join(DATA_DIR, 'memory.json'),
+        turns: path.join(DATA_DIR, 'turn-traces.json'),
+        approvals: path.join(DATA_DIR, 'history.json'),
+      },
+      providers: {
+        anthropicConfigured: providerStatus.anthropicConfigured,
+        openaiConfigured: providerStatus.openaiConfigured,
+        localConfigured: providerStatus.localConfigured,
+      },
+      remoteInferencePossible: Boolean(providerStatus.anthropicConfigured || providerStatus.openaiConfigured),
+      localOnlyReady: Boolean(providerStatus.localConfigured),
+      notes: [
+        'Artifacts, turn traces, approvals, and memory are stored in the local data directory.',
+        'Remote model providers are only used when configured explicitly.',
+        'Local models can be used through the configured local provider path.',
+      ],
+    });
   }
   if (is('/api/sandbox/assess', 'POST')) {
     try {
@@ -852,7 +893,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
           reviewId: reviewResult?.id || null,
           state: reviewResult?.state || 'submitted',
           submittedAt: Date.now(),
-          url: `https:
+          url: `https://github.com/${body.owner}/${body.repo}/pull/${body.pullNumber}`,
         },
       });
       return json(res, 200, reviewResult);
@@ -1050,6 +1091,33 @@ async function handleAPI(pathname, method, body, q, res, req) {
     } catch (err) {
       return json(res, 400, { error: err.message });
     }
+  }
+  if (is('/api/swarm/preview', 'POST')) {
+    try {
+      const resolvedProviders = resolveModelProviders(body.apiKey);
+      const contextFiles = await resolveContextFilesForTask(body.goal, resolvedProviders, {
+        maxFiles: 8,
+        maxTokens: 10000,
+      });
+      return json(res, 200, await swarmCoordinator.preview({
+        goal: body.goal,
+        projectRoot,
+        apiKey: resolvedProviders,
+        contextFiles,
+        identityContext: getWorkspaceIdentityPrompt(),
+        maxAgents: body.maxAgents,
+      }));
+    } catch (err) {
+      return json(res, 400, { error: err.message });
+    }
+  }
+  if (is('/api/swarm/sessions', 'GET')) {
+    return json(res, 200, swarmCoordinator.listSessions(Number(q.limit) || 12));
+  }
+  const swarmSessionM = pathname.match(/^\/api\/swarm\/sessions\/([^/]+)$/);
+  if (swarmSessionM && method === 'GET') {
+    const session = swarmCoordinator.getSession(swarmSessionM[1]);
+    return session ? json(res, 200, session) : json(res, 404, { error: 'Session not found' });
   }
   const agentIdM = pathname.match(/^\/api\/agents\/([^/]+)$/);
   if (agentIdM) {
@@ -1495,6 +1563,27 @@ async function handleAPI(pathname, method, body, q, res, req) {
   if (is('/api/connectors', 'GET')) {
     return json(res, 200, connectorManager.list());
   }
+  if (is('/api/mcp/registry', 'GET')) {
+    return json(res, 200, mcpRegistry.list());
+  }
+  if (is('/api/mcp/registry', 'POST')) {
+    try {
+      return json(res, 200, { ok: true, entry: mcpRegistry.create(body || {}) });
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
+  const mcpRegistryM = pathname.match(/^\/api\/mcp\/registry\/([^/]+)$/);
+  if (mcpRegistryM) {
+    if (method === 'PATCH') {
+      try {
+        const entry = mcpRegistry.update(mcpRegistryM[1], body || {});
+        return entry ? json(res, 200, { ok: true, entry }) : json(res, 404, { error: 'Registry entry not found' });
+      } catch (err) { return json(res, 400, { error: err.message }); }
+    }
+    if (method === 'DELETE') {
+      const result = mcpRegistry.remove(mcpRegistryM[1]);
+      return json(res, result.ok ? 200 : 404, result);
+    }
+  }
   const connectorActionM = pathname.match(/^\/api\/connectors\/([^/]+)\/action$/);
   if (connectorActionM && method === 'POST') {
     try {
@@ -1531,6 +1620,26 @@ async function handleAPI(pathname, method, body, q, res, req) {
   }
   if (is('/api/automations/notifications', 'GET')) {
     return json(res, 200, automations.listNotifications());
+  }
+  if (is('/api/companion/feed', 'GET')) {
+    return json(res, 200, buildCompanionFeed({
+      notifications: automations.listNotifications(Number(q.limit) || 20),
+      artifacts: artifactStore.list(Number(q.limit) || 20),
+      pendingChanges: approvalQueue.getPending(),
+      recentTurns: turnTraceStore.listRecent(Number(q.limit) || 12),
+      jobs: automations.listJobs(),
+      limit: Number(q.limit) || 30,
+    }));
+  }
+  if (is('/api/companion/summary', 'GET')) {
+    return json(res, 200, buildCompanionFeed({
+      notifications: automations.listNotifications(8),
+      artifacts: artifactStore.list(8),
+      pendingChanges: approvalQueue.getPending(),
+      recentTurns: turnTraceStore.listRecent(6),
+      jobs: automations.listJobs(),
+      limit: 8,
+    }).summary);
   }
   if (is('/api/artifacts', 'GET')) {
     return json(res, 200, artifactStore.list(Number(q.limit) || 40));
@@ -1738,17 +1847,18 @@ const server = http.createServer(router);
 
 server.listen(PORT, async () => {
   const sbInfo = await sandbox.getSandboxInfo();
+  const url = `http://127.0.0.1:${PORT}`;
   console.log(`
 ╔══════════════════════════════════════════════════╗
 ║           clsClaw — Zero Dependencies            ║
 ╠══════════════════════════════════════════════════╣
-║  URL:      http:
+║  URL:      ${url.padEnd(38)} ║
 ║  Project:  ${projectRoot.slice(0,38).padEnd(38)} ║
 ║  Sandbox:  ${sbInfo.mode.padEnd(38)} ║
 ║  Node:     ${process.version.padEnd(38)} ║
 ╚══════════════════════════════════════════════════╝
 `);
-  try { const { exec } = require('child_process'); exec(`open http:
+  try { const { exec } = require('child_process'); exec(`open ${url}`); }
   catch {}
 });
 

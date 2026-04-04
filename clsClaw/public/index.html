@@ -102,6 +102,18 @@ body{min-height:100vh;min-height:100dvh}
 .chip:hover{border-color:var(--accent);background:var(--bg3)}
 .chip-cat{font-size:9px;font-family:var(--mono);color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.08em}
 .chip-txt{font-size:12px;color:var(--text);line-height:1.5}
+.discover-panel{width:100%;max-width:720px;background:linear-gradient(180deg,rgba(124,106,247,0.08),rgba(17,17,23,0.85));border:1px solid rgba(124,106,247,0.18);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.discover-heading{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.discover-kicker{font-size:10px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent2);margin-bottom:4px}
+.discover-summary{font-size:12px;line-height:1.6;color:var(--muted)}
+.discover-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
+.discover-card{background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px;cursor:pointer;text-align:left;color:var(--text);transition:all .15s}
+.discover-card:hover{border-color:rgba(124,106,247,0.35);background:rgba(124,106,247,0.08);transform:translateY(-1px)}
+.discover-top{display:flex;gap:8px;align-items:center}
+.discover-label,.discover-profile{font-size:10px;font-family:var(--mono);color:var(--muted)}
+.discover-profile{margin-left:auto;color:var(--amber)}
+.discover-title{font-size:12px;font-weight:700;color:var(--text)}
+.discover-detail{font-size:11px;line-height:1.6;color:var(--muted)}
 
 
 .msg{display:flex;flex-direction:column;gap:6px;animation:fadeUp .2s ease}
@@ -185,6 +197,10 @@ pre.cb-body::-webkit-scrollbar-thumb{background:var(--border2)}
 .visual-card-top{display:flex;align-items:center;gap:8px;font-size:11px;font-family:var(--mono);margin-bottom:4px}
 .visual-chip{font-size:9px;border:1px solid rgba(52,211,153,0.35);border-radius:999px;padding:2px 6px;color:var(--green)}
 .visual-snippet{font-size:11px;line-height:1.6;color:var(--muted);white-space:pre-wrap}
+.debug-lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:10px}
+.debug-step{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:9px 10px;display:flex;flex-direction:column;gap:6px}
+.debug-step-stage{font-size:10px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent2)}
+.debug-step-detail{font-size:11px;line-height:1.6;color:var(--text)}
 .evidence-deck{width:100%;max-width:90%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 .evidence-deck-title{font-size:10px;font-family:var(--mono);color:var(--accent2);text-transform:uppercase;letter-spacing:.08em}
 .evidence-deck-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
@@ -234,6 +250,15 @@ textarea#prompt::placeholder{color:var(--hint)}
 .profile-btn{font-size:10px;font-family:var(--mono);padding:4px 8px;border-radius:999px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}
 .profile-btn:hover{color:var(--text);background:var(--bg3)}
 .profile-btn.active{color:var(--amber);border-color:rgba(251,191,36,0.35);background:rgba(251,191,36,0.08)}
+.composer-guide{padding:8px 11px 10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:7px;background:linear-gradient(180deg,rgba(124,106,247,0.03),rgba(17,17,23,0))}
+.composer-row{display:flex;gap:8px;align-items:flex-start}
+.composer-label{min-width:68px;font-size:10px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--hint);padding-top:4px}
+.composer-chips{display:flex;gap:6px;flex-wrap:wrap}
+.composer-chip{font-size:10px;font-family:var(--mono);padding:4px 8px;border-radius:999px;border:1px solid var(--border2);background:transparent;color:var(--accent2);cursor:pointer;transition:all .15s}
+.composer-chip:hover{color:var(--text);background:var(--bg3)}
+.composer-chip.active{color:var(--amber);border-color:rgba(251,191,36,0.35);background:rgba(251,191,36,0.08)}
+.composer-chip.subtle{color:var(--blue);border-color:rgba(96,165,250,0.25)}
+.composer-caption{font-size:10px;font-family:var(--mono);color:var(--muted);line-height:1.6}
 
 
 .rpanel{background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;min-width:0}
@@ -687,6 +712,8 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
             <div class="chip" onclick="go('Refactor my code for better readability and maintainability', 'build')"><div class="chip-cat">refactor</div><div class="chip-txt">Refactor codebase</div></div>
             <div class="chip" onclick="go('Add a new feature to my existing project', 'build')"><div class="chip-cat">build</div><div class="chip-txt">Add a feature</div></div>
           </div>
+          <div id="discoverability-welcome"></div>
+          <div id="workspace-pulse"></div>
         </div>
       </div>
       <div class="input-wrap">
@@ -715,6 +742,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
             </div>
             <span class="hint" style="margin-left:auto" id="ctx-status">no index</span>
           </div>
+          <div id="composer-guide-host"></div>
         </div>
       </div>
     </div>
@@ -750,8 +778,10 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
       <div class="row" style="gap:8px;margin-bottom:10px">
         <button class="new-agent-btn" style="margin:0;flex:1" onclick="openAgentModal()">⚡ Launch new agent</button>
         <button class="gh-btn" onclick="launchParallelBatch()">⇉ Launch batch</button>
-        <button class="gh-btn" onclick="launchSwarmPrompt()">🕸 Swarm</button>
+        <button class="gh-btn" onclick="launchSwarmPrompt()">🕸 Preview swarm</button>
       </div>
+      <div id="swarm-preview-host" style="margin-bottom:10px"></div>
+      <div id="swarm-sessions-host" style="margin-bottom:12px"></div>
       <div class="scrollable" style="padding:0" id="agents-list">
         <div class="empty-state"><span style="font-size:22px">⚡</span><span>No agents running</span><span>Each agent runs in its own worker thread + git worktree</span></div>
       </div>
@@ -789,8 +819,10 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
           <div style="font-size:16px;font-weight:700;margin-bottom:4px">Apps & Connectors</div>
           <div style="font-size:11px;font-family:var(--mono);color:var(--muted)">Typed actions across workspace, skills, automations, and connected services</div>
         </div>
+        <button class="gh-btn" style="width:auto;padding:6px 10px;margin:0" onclick="createMcpRegistryEntry()">Add MCP entry</button>
         <button class="gh-btn" style="width:auto;padding:6px 10px;margin:0" onclick="loadConnectors()">Refresh</button>
       </div>
+      <div id="mcp-registry-host" style="margin-bottom:12px"></div>
       <div class="skills-grid" id="connectors-grid" style="margin-bottom:10px"></div>
       <div id="connector-result-area"></div>
     </div>
@@ -811,6 +843,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
         <button class="gh-btn" style="width:auto;padding:6px 10px" onclick="createHeartbeatPreset('paper-tracker')">+ paper tracker</button>
         <button class="gh-btn" style="width:auto;padding:6px 10px" onclick="createHeartbeatPreset('team-status-briefing')">+ team status briefing</button>
       </div>
+      <div id="companion-feed-host" style="margin-bottom:12px"></div>
       <div style="margin-bottom:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg2);padding:10px">
         <div class="row" style="margin-bottom:8px">
           <div style="font-size:12px;font-weight:700;flex:1">Heartbeat Inbox</div>
@@ -1262,6 +1295,9 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
 
 <div class="toast-wrap" id="toasts"></div>
 
+<script src="/app/uiModules.js"></script>
+<script src="/app/reviewModules.js"></script>
+<script src="/app/opsModules.js"></script>
 <script>
 
 let providerDraft = {
@@ -1296,6 +1332,8 @@ let currentBrowseDir = '';
 let skills = [];
 let pluginCatalog = [];
 let connectors = [];
+let mcpRegistryEntries = [];
+let currentSwarmPreview = null;
 let currentDiffChangeId = null;
 let liveLogEvents = [];
 let missionState = {
@@ -1308,6 +1346,7 @@ let missionState = {
   evidenceStatus: null,
   evidenceSummary: '',
   approvalRequired: false,
+  privacySummary: '',
   updatedAt: null,
 };
 
@@ -1335,6 +1374,7 @@ async function init() {
   await loadFiles();
   await loadSkills();
   await loadConnectors();
+  await loadSwarmSessions();
   await loadAutomationInbox();
   await loadChanges();
   await loadPermissions();
@@ -1342,6 +1382,9 @@ async function init() {
   loadHistory();
   connectWS();
   await loadMissionControl();
+  await loadPrivacySummary();
+  await loadWorkspacePulse();
+  await loadCompanionFeed();
   await refreshHealthPill();
   updateApiKeyWarning();
 }
@@ -1361,27 +1404,28 @@ function connectWS() {
       
       case 'change:proposed':
         loadChanges();
+        loadCompanionFeed();
         bumpBadge('changes-badge', 1);
         toast('📄 Change proposed: ' + describePendingChange(d.change), 'warn');
         break;
       case 'change:approved':
-        loadChanges(); loadHistory(); loadFiles();
+        loadChanges(); loadHistory(); loadFiles(); loadCompanionFeed();
         toast('✓ Approved: ' + describePendingChange(d.change), 'ok');
         break;
       case 'change:updated':
-        loadChanges();
+        loadChanges(); loadCompanionFeed();
         toast('↻ Review updated', 'ok');
         break;
       case 'change:rejected':
-        loadChanges();
+        loadChanges(); loadCompanionFeed();
         toast('✕ Rejected: ' + describePendingChange(d.change));
         break;
       case 'change:conflict_updated':
-        loadChanges();
+        loadChanges(); loadCompanionFeed();
         toast(`⚠ Conflict on ${describePendingChange(d.change)} — two agents targeting same file`, 'warn');
         break;
       case 'change:conflict_resolved':
-        loadChanges();
+        loadChanges(); loadCompanionFeed();
         toast(`✓ Conflict resolved: ${describePendingChange(d.change)}`, 'ok');
         break;
       case 'file:restored':
@@ -1420,6 +1464,7 @@ function connectWS() {
       case 'agent:status':
 
         updateAgentStatus(d.agent);
+        loadSwarmSessions();
         break;
       case 'agent:done':
       case 'agent:error':
@@ -1435,13 +1480,16 @@ function connectWS() {
         toast('⏱ Job done: ' + d.result.jobName, 'ok');
         loadJobs();
         loadAutomationInbox();
+        loadCompanionFeed();
         break;
       case 'notification:new':
         loadAutomationInbox();
+        loadCompanionFeed();
         toast('🔔 Heartbeat inbox: ' + (d.notification?.jobName || 'automation update'), d.notification?.status === 'error' ? 'err' : 'warn');
         break;
       case 'notification:updated':
         loadAutomationInbox();
+        loadCompanionFeed();
         break;
 
       case 'plan:created':
@@ -1589,22 +1637,9 @@ function renderMissionControl() {
   const phase = missionState.phase || 'idle';
   summaryEl.textContent = missionState.summary || 'Idle. Start a task to see live orchestration state.';
   subEl.textContent = missionState.subtext || `profile=${profile} · phase=${phase}`;
-  const chips = [];
-  chips.push(`<span class="mission-chip profile">profile: ${esc(profile)}</span>`);
-  chips.push(`<span class="mission-chip phase">phase: ${esc(phase)}</span>`);
-  if (missionState.evidenceStatus) {
-    chips.push(`<span class="mission-chip ${missionState.evidenceStatus === 'strong' || missionState.evidenceStatus === 'grounded' ? 'good' : ''}">evidence: ${esc(missionState.evidenceStatus)}</span>`);
-  }
-  if (missionState.approvalRequired) {
-    chips.push('<span class="mission-chip approval">approval required</span>');
-  }
-  if (missionState.nextAction && missionState.nextAction !== 'wait') {
-    chips.push(`<span class="mission-chip">next: ${esc(String(missionState.nextAction).slice(0, 48))}</span>`);
-  }
-  if (missionState.evidenceSummary) {
-    chips.push(`<span class="mission-chip">${esc(String(missionState.evidenceSummary).slice(0, 72))}</span>`);
-  }
-  chipsEl.innerHTML = chips.join('');
+  chipsEl.innerHTML = window.clsClawModules?.renderMissionControlChips
+    ? window.clsClawModules.renderMissionControlChips({ missionState, executionProfile })
+    : '';
 }
 
 function updateMissionControl(patch = {}) {
@@ -1632,6 +1667,7 @@ function hydrateMissionFromTurn(turn) {
     evidenceStatus: turn.governor?.evidenceStatus || null,
     evidenceSummary: turn.evidenceBundle?.summary || '',
     approvalRequired: Boolean(turn.governor?.shouldPauseForApproval || turn.plan?.approvalRequired),
+    privacySummary: missionState.privacySummary || '',
   });
 }
 
@@ -1650,8 +1686,18 @@ async function loadMissionControl() {
       evidenceStatus: null,
       evidenceSummary: '',
       approvalRequired: false,
+      privacySummary: missionState.privacySummary || '',
     });
   }
+}
+
+async function loadPrivacySummary() {
+  const data = await api('GET', '/api/privacy').catch(() => null);
+  if (!data) return;
+  const mode = data.remoteInferencePossible ? 'remote-capable' : data.localOnlyReady ? 'local-ready' : 'provider-pending';
+  updateMissionControl({
+    privacySummary: `privacy=${mode} · storage=local`,
+  });
 }
 
 const VIEWS = ['chat','changes','perms','agents','worktrees','skills','apps','auto','github','ctx','plan','memory','identity','security'];
@@ -1887,9 +1933,13 @@ function renderApprovalContextPanel(ctx) {
       ${ctx.risk ? `<span>risk=${esc(ctx.risk)}</span>` : ''}
       ${ctx.evidenceStatus ? `<span>evidence=${esc(ctx.evidenceStatus)}</span>` : ''}
       ${ctx.autonomyAllowance ? `<span>autonomy=${esc(ctx.autonomyAllowance)}</span>` : ''}
+      ${ctx.writeScope ? `<span>scope=${esc(ctx.writeScope)}</span>` : ''}
+      ${ctx.nextStep ? `<span>next=${esc(ctx.nextStep)}</span>` : ''}
     </div>
     ${ctx.evidenceSummary ? `<div style="margin-top:8px;font-size:11px;color:var(--muted);line-height:1.5">${esc(ctx.evidenceSummary)}</div>` : ''}
     ${ctx.verificationPlan ? `<div style="margin-top:8px;font-size:11px;color:var(--muted);line-height:1.5"><strong style="color:var(--text)">after approval:</strong> ${esc(ctx.verificationPlan)}</div>` : ''}
+    ${ctx.budget ? `<div style="margin-top:8px;font-size:11px;color:var(--muted);line-height:1.5"><strong style="color:var(--text)">autonomy budget:</strong> steps ${esc(String(ctx.budget.toolSteps || 0))}/${esc(String(ctx.budget.maxToolSteps ?? 'n/a'))} · recovery ${esc(String(ctx.budget.recoveryPasses || 0))}/${esc(String(ctx.budget.maxRecoveryPasses ?? 'n/a'))} · max scope ${esc(String(ctx.budget.maxWriteScope || 'bounded_multi_file'))}</div>` : ''}
+    ${(ctx.externalActionRequested || ctx.hostSensitiveAction) ? `<div style="margin-top:8px;font-size:11px;color:var(--amber);line-height:1.5">${esc(ctx.externalActionRequested ? 'External side effects are involved.' : 'Host or network sensitive execution is involved.')}</div>` : ''}
     ${reasons.length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${reasons.map((reason) => `<span class="review-anchor shifted">${esc(reason)}</span>`).join('')}</div>` : ''}
   </div>`;
 }
@@ -1965,25 +2015,8 @@ function renderReviewCard(c) {
       </div>
       ${githubStatus}
       ${renderApprovalContextPanel(c.approvalContext)}
-      ${evidenceBundle?.summary ? `<div class="review-section">
-        <div class="review-section-title">Evidence</div>
-        <div style="font-size:11px;color:var(--muted);line-height:1.6">${esc(evidenceBundle.summary)}</div>
-        ${reviewBundle?.evidence?.categories ? `<div style="margin-top:8px;font-size:10px;font-family:var(--mono);color:var(--muted)">${esc(Object.entries(reviewBundle.evidence.categories).filter(([,count]) => Number(count) > 0).map(([key,count]) => `${key}:${count}`).join(' · '))}</div>` : ''}
-        ${reviewBundle?.evidence?.groundingHighlights?.length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${reviewBundle.evidence.groundingHighlights.map((item) => `<span class="review-anchor exact">${esc(item)}</span>`).join('')}</div>` : ''}
-        ${reviewBundle?.evidence?.topExternalSources?.length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${reviewBundle.evidence.topExternalSources.map((source) => `<a class="review-source-pill" href="${escAttr(source.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">${esc(source.title)}</a>`).join('')}</div>` : ''}
-        ${reviewBundle?.evidence?.topVisualEvidence?.length ? `<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">${reviewBundle.evidence.topVisualEvidence.map((item) => `<div class="visual-card"><div class="visual-card-top"><span class="visual-chip">${esc(item.citationId || 'V')}</span><span>${esc(item.title)}</span></div><div class="visual-snippet">${esc(String(item.snippet || '').slice(0, 220))}</div></div>`).join('')}</div>` : ''}
-      </div>` : ''}
-      ${reviewBundle?.visualDebug ? `<div class="review-section">
-        <div class="review-section-title">Visual Debug Workflow</div>
-        <div style="font-size:11px;color:var(--muted);line-height:1.6">${esc(reviewBundle.visualDebug.summary)}</div>
-        <div style="margin-top:8px;font-size:11px;color:var(--text);line-height:1.6"><strong>Primary issue:</strong> ${esc(reviewBundle.visualDebug.primaryIssue || 'Visual issue captured.')}</div>
-        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-          <span class="review-anchor ${reviewBundle.visualDebug.confidence === 'grounded' ? 'exact' : 'shifted'}">${esc(reviewBundle.visualDebug.confidence)}</span>
-          ${reviewBundle.visualDebug.relatedFiles?.map((file) => `<span class="review-anchor exact">${esc(file.label)}</span>`).join('') || ''}
-        </div>
-        ${reviewBundle.visualDebug.docSources?.length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${reviewBundle.visualDebug.docSources.map((source) => `<a class="review-source-pill" href="${escAttr(source.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">${esc(source.title)}</a>`).join('')}</div>` : ''}
-        ${reviewBundle.visualDebug.nextSteps?.length ? `<div style="margin-top:10px" class="review-findings-list">${reviewBundle.visualDebug.nextSteps.map((step) => `<div class="review-finding-row"><span class="review-finding-bullet">•</span><span>${esc(step)}</span></div>`).join('')}</div>` : ''}
-      </div>` : ''}
+      ${window.clsClawReviewModules?.renderReviewEvidenceSection ? window.clsClawReviewModules.renderReviewEvidenceSection(reviewBundle, evidenceBundle, makeEvidenceDeckMarkup) : ''}
+      ${reviewBundle?.visualDebug && window.clsClawReviewModules?.renderVisualDebugLaneMarkup ? window.clsClawReviewModules.renderVisualDebugLaneMarkup(reviewBundle.visualDebug, { compact: true }) : ''}
       ${reviewBundle?.fixSuggestions?.length ? `<div class="review-section">
         <div class="review-section-title">Fix Suggestions</div>
         <div class="review-findings-list">${reviewBundle.fixSuggestions.map((suggestion) => `
@@ -1994,13 +2027,13 @@ function renderReviewCard(c) {
           </div>
         `).join('')}</div>
       </div>` : ''}
-      ${evidenceBundle?.summary ? `<div class="review-section">
-        <div class="review-section-title">Evidence Deck</div>
-        ${makeEvidenceDeckMarkup(evidenceBundle, { sources: reviewBundle?.evidence?.topExternalSources || [], visualEvidence: reviewBundle?.evidence?.topVisualEvidence || [] })}
-      </div>` : ''}
       ${reviewBundle?.verificationNotes?.length ? `<div class="review-section">
         <div class="review-section-title">Verification Notes</div>
         <div class="review-findings-list">${reviewBundle.verificationNotes.map((note) => `<div class="review-finding-row"><span class="review-finding-bullet">•</span><span>${esc(note)}</span></div>`).join('')}</div>
+      </div>` : ''}
+      ${reviewBundle?.auditTrail?.length ? `<div class="review-section">
+        <div class="review-section-title">Audit Trail</div>
+        <div class="review-findings-list">${reviewBundle.auditTrail.map((step) => `<div class="review-finding-row"><span class="review-finding-bullet">•</span><span><strong>${esc(step.label)}</strong> — ${step.url ? `<a href="${escAttr(step.url)}" target="_blank" rel="noopener noreferrer">${esc(step.detail)}</a>` : esc(step.detail)}</span></div>`).join('')}</div>
       </div>` : ''}
       ${reviewSources.length > 0 ? `<div class="review-section">
         <div class="review-section-title">Sources</div>
@@ -2493,16 +2526,54 @@ async function launchSwarmPrompt() {
   if (!goal || !goal.trim()) return;
   const maxAgentsRaw = prompt('Max agents (2-6):', '4');
   const maxAgents = Math.max(2, Math.min(6, Number(maxAgentsRaw) || 4));
-  const result = await api('POST', '/api/swarm', {
+  const result = await api('POST', '/api/swarm/preview', {
     goal,
     maxAgents,
     apiKey: currentApiKey(),
   }).catch(err => { toast(err.message, 'err'); return null; });
+  if (result?.tasks?.length) {
+    currentSwarmPreview = result;
+    renderSwarmPreview();
+    toast(`🕸 Swarm preview ready — ${result.tasks.length} specialist task${result.tasks.length === 1 ? '' : 's'}`, 'ok');
+    setView('agents');
+  }
+}
+
+function renderSwarmPreview() {
+  const host = document.getElementById('swarm-preview-host');
+  if (!host) return;
+  host.innerHTML = window.clsClawOpsModules?.renderSwarmPreview
+    ? window.clsClawOpsModules.renderSwarmPreview(currentSwarmPreview)
+    : '';
+}
+
+async function launchSwarmFromPreview() {
+  if (!currentSwarmPreview?.goal) {
+    toast('No swarm preview ready', 'warn');
+    return;
+  }
+  const result = await api('POST', '/api/swarm', {
+    goal: currentSwarmPreview.goal,
+    maxAgents: currentSwarmPreview.maxAgents || currentSwarmPreview.tasks?.length || 4,
+    apiKey: currentApiKey(),
+  }).catch(err => { toast(err.message, 'err'); return null; });
   if (result?.agents?.length) {
     toast(`🕸 Swarm launched — ${result.agents.length} specialist agent${result.agents.length === 1 ? '' : 's'}`, 'ok');
+    currentSwarmPreview = null;
+    renderSwarmPreview();
     setView('agents');
-    loadAgents();
+    await loadAgents();
+    await loadSwarmSessions();
   }
+}
+
+async function loadSwarmSessions() {
+  const host = document.getElementById('swarm-sessions-host');
+  if (!host) return;
+  const sessions = await api('GET', '/api/swarm/sessions?limit=6').catch(() => []);
+  host.innerHTML = window.clsClawOpsModules?.renderSwarmSessions
+    ? window.clsClawOpsModules.renderSwarmSessions(sessions)
+    : '';
 }
 
 async function loadAgents() {
@@ -2512,6 +2583,7 @@ async function loadAgents() {
 
   renderAgentList(agents, 'agents-list', true);
   renderAgentList(agents.slice(0,4), 'mini-agents', false);
+  loadSwarmSessions();
 }
 
 function renderAgentList(agents, containerId, full) {
@@ -2748,6 +2820,7 @@ async function installLocalPlugin() {
 
 async function loadConnectors() {
   connectors = await api('GET', '/api/connectors').catch(() => []);
+  await loadMcpRegistry();
   const grid = document.getElementById('connectors-grid');
   if (!grid) return;
   if (!connectors.length) {
@@ -2780,6 +2853,87 @@ async function loadConnectors() {
       ` : ''}
     </div>
   `).join('');
+}
+
+async function loadMcpRegistry() {
+  mcpRegistryEntries = await api('GET', '/api/mcp/registry').catch(() => []);
+  const host = document.getElementById('mcp-registry-host');
+  if (!host) return;
+  host.innerHTML = `
+    <div style="margin-bottom:8px;font-size:12px;font-weight:700">Ecosystem Registry</div>
+    ${window.clsClawOpsModules?.renderMcpRegistry ? window.clsClawOpsModules.renderMcpRegistry(mcpRegistryEntries) : ''}
+  `;
+}
+
+async function createMcpRegistryEntry() {
+  const name = prompt('MCP entry name:');
+  if (!name || !name.trim()) return;
+  const transport = (prompt('Transport (stdio/http):', 'stdio') || 'stdio').trim().toLowerCase() === 'http' ? 'http' : 'stdio';
+  const description = prompt('Description:', '') || '';
+  const commandOrUrl = prompt(transport === 'http' ? 'HTTP endpoint URL:' : 'stdio command:', transport === 'http' ? 'http://127.0.0.1:8787/mcp' : 'npx @modelcontextprotocol/server-filesystem');
+  if (!commandOrUrl || !commandOrUrl.trim()) return;
+  const capabilities = (prompt('Capabilities (comma-separated):', 'resources,tools') || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const payload = {
+    name,
+    transport,
+    description,
+    capabilities,
+    trust: {
+      level: 'custom',
+      verified: false,
+      requiresNetwork: transport === 'http',
+      requiresAuth: false,
+    },
+  };
+  if (transport === 'http') payload.url = commandOrUrl.trim();
+  else payload.command = commandOrUrl.trim();
+  const result = await api('POST', '/api/mcp/registry', payload).catch(err => { toast(err.message, 'err'); return null; });
+  if (result?.ok) {
+    toast(`✓ MCP entry saved: ${name}`, 'ok');
+    loadMcpRegistry();
+  }
+}
+
+function findMcpRegistryEntry(id) {
+  return mcpRegistryEntries.find((entry) => entry.id === id) || null;
+}
+
+async function editMcpRegistryEntry(id) {
+  const entry = findMcpRegistryEntry(id);
+  if (!entry) return;
+  const description = prompt('Description:', entry.description || '');
+  if (description === null) return;
+  const capabilities = prompt('Capabilities (comma-separated):', (entry.capabilities || []).join(', '));
+  if (capabilities === null) return;
+  const result = await api('PATCH', `/api/mcp/registry/${encodeURIComponent(id)}`, {
+    description,
+    capabilities: capabilities.split(',').map((item) => item.trim()).filter(Boolean),
+  }).catch(err => { toast(err.message, 'err'); return null; });
+  if (result?.ok) {
+    toast('✓ MCP entry updated', 'ok');
+    loadMcpRegistry();
+  }
+}
+
+async function toggleMcpRegistryEntry(id, enabled) {
+  const result = await api('PATCH', `/api/mcp/registry/${encodeURIComponent(id)}`, {
+    enabled: Boolean(enabled),
+  }).catch(err => { toast(err.message, 'err'); return null; });
+  if (result?.ok) {
+    toast(`✓ MCP entry ${enabled ? 'enabled' : 'disabled'}`, 'ok');
+    loadMcpRegistry();
+  }
+}
+
+async function deleteMcpRegistryEntry(id) {
+  const result = await api('DELETE', `/api/mcp/registry/${encodeURIComponent(id)}`).catch(err => { toast(err.message, 'err'); return null; });
+  if (result?.ok) {
+    toast('✓ MCP entry deleted', 'ok');
+    loadMcpRegistry();
+  }
 }
 
 function connectorById(connectorId) {
@@ -2997,6 +3151,7 @@ async function loadJobs() {
   const el = document.getElementById('jobs-list');
   loadAutomationInbox();
   loadArtifacts();
+  loadCompanionFeed();
   if (!jobs.length) { el.innerHTML = `<div class="empty-state"><span style="font-size:22px">⏱</span><span>No jobs</span></div>`; return; }
   el.innerHTML = jobs.map(j => `
     <div class="job-card">
@@ -3009,6 +3164,15 @@ async function loadJobs() {
         <button class="job-btn" onclick="deleteJob('${j.id}')">delete</button>
       </div>
     </div>`).join('');
+}
+
+async function loadCompanionFeed() {
+  const host = document.getElementById('companion-feed-host');
+  if (!host) return;
+  const feed = await api('GET', '/api/companion/feed?limit=12').catch(() => null);
+  host.innerHTML = window.clsClawOpsModules?.renderCompanionFeed
+    ? window.clsClawOpsModules.renderCompanionFeed(feed)
+    : '';
 }
 
 async function loadAutomationInbox() {
@@ -3115,6 +3279,18 @@ async function loadArtifacts() {
   `).join('');
 }
 
+function renderArtifactMetadataRows(metadata) {
+  return window.clsClawModules?.renderArtifactMetadataRows
+    ? window.clsClawModules.renderArtifactMetadataRows(metadata)
+    : '';
+}
+
+function renderArtifactParsedContent(artifact) {
+  return window.clsClawModules?.renderArtifactParsedContent
+    ? window.clsClawModules.renderArtifactParsedContent(artifact)
+    : `<pre style="white-space:pre-wrap;font-family:var(--mono);font-size:11px;color:var(--text)">${esc(String(artifact?.content || ''))}</pre>`;
+}
+
 async function openArtifact(id) {
   const artifact = await api('GET', `/api/artifacts/${id}`).catch(err => ({ error: err.message }));
   if (!artifact || artifact.error) {
@@ -3127,7 +3303,12 @@ async function openArtifact(id) {
       <div class="skill-result">
         <div style="font-size:12px;font-weight:700;margin-bottom:8px">${esc(artifact.title || 'Artifact')}</div>
         <div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">${esc(artifact.type || 'artifact')} · ${timeAgo(artifact.createdAt)}</div>
-        <pre style="white-space:pre-wrap;font-family:var(--mono);font-size:11px;color:var(--text)">${esc(String(artifact.content || ''))}</pre>
+        ${artifact.summary ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">${esc(artifact.summary)}</div>` : ''}
+        ${renderArtifactMetadataRows({ ...(artifact.metadata || {}), projectRoot: artifact.projectRoot || '' })}
+        <div style="margin-top:10px">
+          <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--hint);margin-bottom:4px">Content</div>
+          ${renderArtifactParsedContent(artifact)}
+        </div>
       </div>
     `;
   }
@@ -3485,6 +3666,56 @@ function getPromptPlaceholder(mode = chatMode) {
     : 'Ask about the codebase, architecture, bugs, or next steps...';
 }
 
+function renderDiscoverabilityPanels() {
+  const welcomeHost = document.getElementById('discoverability-welcome');
+  const composerHost = document.getElementById('composer-guide-host');
+  if (welcomeHost && window.clsClawModules?.renderWelcomePanel) {
+    welcomeHost.innerHTML = window.clsClawModules.renderWelcomePanel();
+  }
+  if (composerHost && window.clsClawModules?.renderComposerGuide) {
+    composerHost.innerHTML = window.clsClawModules.renderComposerGuide({
+      mode: chatMode,
+      profile: executionProfile,
+    });
+  }
+}
+
+async function loadWorkspacePulse() {
+  const host = document.getElementById('workspace-pulse');
+  if (!host) return;
+  const health = await api('GET', '/api/health').catch(() => null);
+  if (!health || !window.clsClawModules?.renderWorkspacePulse) {
+    host.innerHTML = '';
+    return;
+  }
+  host.innerHTML = window.clsClawModules.renderWorkspacePulse(health);
+}
+
+function applyQuickTemplate(templateId) {
+  const template = window.clsClawModules?.workflowTemplates?.[templateId];
+  if (!template) return;
+  setView('chat');
+  setChatMode(template.mode || chatMode);
+  setExecutionProfile(template.profile || executionProfile);
+  const prompt = document.getElementById('prompt');
+  if (!prompt) return;
+  prompt.value = template.text || '';
+  prompt.focus();
+  autoResize(prompt);
+}
+
+function insertReferenceTemplate(referenceId) {
+  const template = window.clsClawModules?.referenceTemplates?.[referenceId];
+  if (!template) return;
+  setView('chat');
+  const prompt = document.getElementById('prompt');
+  if (!prompt) return;
+  const prefix = prompt.value && !/\s$/.test(prompt.value) ? ' ' : '';
+  prompt.value = `${prompt.value || ''}${prefix}${template.text || ''}`;
+  prompt.focus();
+  autoResize(prompt);
+}
+
 function setChatMode(mode, persist = true) {
   chatMode = mode === 'build' ? 'build' : 'ask';
   if (persist) localStorage.setItem('cx4_chat_mode', chatMode);
@@ -3492,6 +3723,7 @@ function setChatMode(mode, persist = true) {
   document.getElementById('mode-build')?.classList.toggle('active', chatMode === 'build');
   const prompt = document.getElementById('prompt');
   if (prompt) prompt.placeholder = getPromptPlaceholder(chatMode);
+  renderDiscoverabilityPanels();
 }
 
 function setExecutionProfile(profile, persist = true) {
@@ -3508,6 +3740,7 @@ function setExecutionProfile(profile, persist = true) {
         : `No active turn · ${executionProfile} profile`,
     });
   }
+  renderDiscoverabilityPanels();
 }
 
 function inferChatMode(text) {
@@ -4542,6 +4775,12 @@ function makeTransparencyPanel(data) {
       label: 'Autonomy',
       value: `${data.governor.phaseDirective || 'continue'} · evidence=${data.governor.evidenceStatus || 'unknown'} · continue=${data.governor.allowAutonomousContinuation ? 'yes' : 'no'}`,
     });
+    if (data.governor.budget) {
+      cards.push({
+        label: 'Budget',
+        value: `steps=${data.governor.budget.toolSteps || 0}/${data.governor.budget.maxToolSteps ?? 'n/a'} · recovery=${data.governor.budget.recoveryPasses || 0}/${data.governor.budget.maxRecoveryPasses ?? 'n/a'} · scope=${data.governor.budget.writeScope || 'single_file'}`,
+      });
+    }
   }
   if (data.evidenceBundle?.summary) {
     cards.push({
@@ -4562,6 +4801,18 @@ function makeTransparencyPanel(data) {
     cards.push({
       label: 'Evidence Mix',
       value: Object.entries(data.evidenceBundle.byCategory).map(([key, count]) => `${key}:${count}`).join(' · '),
+    });
+  }
+  if (data.verification) {
+    cards.push({
+      label: 'Verification',
+      value: `${data.verification.status || 'not_required'} · performed=${data.verification.performed ? 'yes' : 'no'}${data.verification.notes?.length ? ` · ${data.verification.notes[0]}` : ''}`,
+    });
+  }
+  if (data.final?.artifactId) {
+    cards.push({
+      label: 'Artifact',
+      value: `saved · ${data.final.artifactId}`,
     });
   }
   panel.innerHTML = `
@@ -4695,30 +4946,9 @@ function deriveCloseoutVisualDebug(transparency, options = {}) {
 
 function makeVisualDebugWorkflowPanel(workflow) {
   const panel = document.createElement('div');
-  panel.className = 'closeout-panel';
-  panel.innerHTML = `
-    <div class="closeout-title">Visual Debug Workflow</div>
-    <div class="closeout-grid">
-      <div class="closeout-card">
-        <div class="closeout-label">Primary Issue</div>
-        <div class="closeout-value">${esc(workflow.primaryIssue || 'Visual issue captured.')}</div>
-      </div>
-      <div class="closeout-card">
-        <div class="closeout-label">Grounding</div>
-        <div class="closeout-value">${esc(workflow.summary || 'Visual evidence collected.')}</div>
-      </div>
-      <div class="closeout-card">
-        <div class="closeout-label">Confidence</div>
-        <div class="closeout-value">${esc(workflow.confidence || 'visual_only')}</div>
-      </div>
-      <div class="closeout-card">
-        <div class="closeout-label">Next Step</div>
-        <div class="closeout-value">${esc((workflow.nextSteps || [])[0] || 'Inspect the issue before editing.')}</div>
-      </div>
-    </div>
-    ${workflow.relatedFiles?.length ? `<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">${workflow.relatedFiles.map((file) => `<span class="review-anchor exact">${esc(file.label)}</span>`).join('')}</div>` : ''}
-    ${workflow.docSources?.length ? `<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">${workflow.docSources.map((source) => `<a class="review-source-pill" href="${escAttr(source.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">${esc(source.title)}</a>`).join('')}</div>` : ''}
-  `;
+  panel.innerHTML = window.clsClawReviewModules?.renderVisualDebugLaneMarkup
+    ? window.clsClawReviewModules.renderVisualDebugLaneMarkup(workflow, { compact: false })
+    : '';
   return panel;
 }
 
@@ -4936,6 +5166,13 @@ async function showHealth() {
     section('Automations'),
     row('Total jobs',      h.automations.jobs,    null),
     row('Enabled',         h.automations.enabled, null),
+
+    section('Local ownership'),
+    row('Artifacts',       h.localOwnership?.artifactsStoredLocally ? 'stored locally' : 'not local', h.localOwnership?.artifactsStoredLocally),
+    row('Memory',          h.localOwnership?.memoryStoredLocally ? 'stored locally' : 'not local', h.localOwnership?.memoryStoredLocally),
+    row('Approvals',       h.localOwnership?.approvalsStoredLocally ? 'stored locally' : 'not local', h.localOwnership?.approvalsStoredLocally),
+    row('Remote providers',h.localOwnership?.remoteProvidersConfigured ? 'configured' : 'none configured', h.localOwnership?.remoteProvidersConfigured ? null : true),
+    row('Local model',     h.localOwnership?.localModelConfigured ? 'configured' : 'not configured', h.localOwnership?.localModelConfigured),
 
     section('Workspace identity'),
     row('Identity files',  h.identity?.files ?? 0, (h.identity?.files ?? 0) >= 3),
@@ -5545,6 +5782,10 @@ async function refreshHealthPill() {
     : '● ok';
   updateHealthIndicator(h);
   updateApiKeyWarning(!h.llmReady, h.llmReady ? '' : 'No LLM provider ready');
+  const pulse = document.getElementById('workspace-pulse');
+  if (pulse && window.clsClawModules?.renderWorkspacePulse) {
+    pulse.innerHTML = window.clsClawModules.renderWorkspacePulse(h);
+  }
 }
 
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }
@@ -5554,7 +5795,7 @@ function isHiddenAlliedShortcut(event) {
   const key = String(event.key || '').toLowerCase();
   const modifier = isMacPlatform ? event.metaKey : event.ctrlKey;
   if (!modifier || !event.shiftKey || event.altKey) return false;
-  return key === '[' || key === '{' || key === 'v';
+  return key === '[' || key === '{';
 }
 function shouldIgnoreGlobalShortcut(event) {
   const el = event.target;

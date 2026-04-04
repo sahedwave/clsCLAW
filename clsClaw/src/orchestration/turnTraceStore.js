@@ -46,6 +46,13 @@ class TurnTraceStore {
       steps: [],
       evidence: [],
       evidenceBundle: createEvidenceBundle(),
+      verification: {
+        required: Boolean(meta.deliberation?.needsVerification),
+        performed: false,
+        status: meta.deliberation?.needsVerification ? 'pending' : 'not_required',
+        notes: [],
+      },
+      artifacts: [],
       final: null,
       error: null,
     };
@@ -119,6 +126,40 @@ class TurnTraceStore {
     turn.updatedAt = new Date().toISOString();
     this._save();
     return clone(turn.plan);
+  }
+
+  updateVerification(turnId, patch = {}) {
+    const turn = this._find(turnId);
+    if (!turn) return null;
+    turn.verification = {
+      ...(turn.verification || {
+        required: false,
+        performed: false,
+        status: 'not_required',
+        notes: [],
+      }),
+      ...patch,
+      notes: Array.isArray(patch.notes)
+        ? patch.notes
+        : Array.isArray(turn.verification?.notes)
+          ? turn.verification.notes
+          : [],
+    };
+    turn.updatedAt = new Date().toISOString();
+    this._save();
+    return clone(turn.verification);
+  }
+
+  attachArtifact(turnId, artifact) {
+    const turn = this._find(turnId);
+    if (!turn) return null;
+    const record = artifact && typeof artifact === 'object' ? { ...artifact } : null;
+    if (!record) return null;
+    turn.artifacts = Array.isArray(turn.artifacts) ? turn.artifacts : [];
+    turn.artifacts.push(record);
+    turn.updatedAt = new Date().toISOString();
+    this._save();
+    return clone(turn.artifacts);
   }
 
   finalizeTurn(turnId, final) {

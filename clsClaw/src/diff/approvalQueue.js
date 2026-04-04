@@ -56,6 +56,7 @@ class ApprovalQueue extends EventEmitter {
           autonomyAllowance: 'bounded',
           risk: 'medium',
           needsVerification: true,
+          writeScope: 'single_file',
         },
         evidenceBundle,
         evidenceStatus: classifyEvidenceStatus(evidenceBundle),
@@ -123,6 +124,7 @@ class ApprovalQueue extends EventEmitter {
         autonomyAllowance: 'bounded',
         risk: reviewData.inlineComments.length || (result?.findings || []).length ? 'medium' : 'low',
         needsVerification: false,
+        writeScope: 'single_file',
       },
       evidenceBundle,
     });

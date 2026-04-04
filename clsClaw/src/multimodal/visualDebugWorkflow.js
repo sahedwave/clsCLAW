@@ -22,11 +22,25 @@ function buildVisualDebugWorkflow({
   return {
     summary: summaryParts.join(' · '),
     confidence,
+    statusLabel: confidence === 'grounded' ? 'grounded visual diagnosis' : 'visual clue only',
     primaryIssue: firstSentence(primaryVisual.snippet) || primaryVisual.title || 'Visual issue captured.',
     visualSources: visualSources.slice(0, 3),
     relatedFiles: relatedFiles.slice(0, 4),
     docSources: docSources.slice(0, 3),
+    coverage: {
+      visuals: visualSources.length,
+      files: relatedFiles.length,
+      docs: docSources.length,
+    },
     nextSteps: buildNextSteps({ relatedFiles, docSources, approvalContext, confidence }),
+    debugLane: buildDebugLane({
+      primaryVisual,
+      relatedFiles,
+      docSources,
+      confidence,
+      summary: summaryParts.join(' · '),
+      nextSteps: buildNextSteps({ relatedFiles, docSources, approvalContext, confidence }),
+    }),
   };
 }
 
@@ -120,6 +134,32 @@ function buildNextSteps({ relatedFiles = [], docSources = [], approvalContext = 
     steps.push('Ground the screenshot with at least one relevant file or doc source before acting.');
   }
   return uniqueStrings(steps).slice(0, 4);
+}
+
+function buildDebugLane({ primaryVisual = null, relatedFiles = [], docSources = [], confidence = 'visual_only', summary = '', nextSteps = [] } = {}) {
+  const lane = [
+    {
+      stage: 'Observe',
+      detail: firstSentence(primaryVisual?.snippet) || primaryVisual?.title || 'Visual issue captured.',
+    },
+    {
+      stage: 'Ground',
+      detail: summary || (confidence === 'grounded' ? 'Visual issue grounded with code/docs.' : 'Needs file or doc grounding.'),
+    },
+    {
+      stage: 'Inspect',
+      detail: relatedFiles.length
+        ? `Start in ${relatedFiles[0].label}.`
+        : docSources.length
+          ? `Compare against ${docSources[0].title}.`
+          : 'Gather one relevant implementation surface.',
+    },
+    {
+      stage: 'Verify',
+      detail: nextSteps[nextSteps.length - 1] || 'Re-check the visual issue after the proposed fix.',
+    },
+  ];
+  return lane;
 }
 
 function firstSentence(text = '') {
