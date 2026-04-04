@@ -64,6 +64,9 @@ test('masked provider config and status report configured providers', () => {
   saveConfig({
     openaiKey: 'sk-openai-1234',
     githubToken: 'ghp_secret_1234',
+    slackWebhookUrl: 'https://hooks.slack.com/services/T000/B000/secret',
+    githubWebhookSecret: 'github-secret-1234',
+    ollamaEmbeddingModel: 'nomic-embed-text',
     embeddingProvider: 'openai',
   });
 
@@ -72,10 +75,15 @@ test('masked provider config and status report configured providers', () => {
 
   assert.match(masked.openaiKey, /^\*+1234$/);
   assert.match(masked.githubToken, /^\*+1234$/);
+  assert.equal(masked.slackConfigured, true);
+  assert.equal(masked.githubWebhookConfigured, true);
+  assert.equal(masked.ollamaEmbeddingModel, 'nomic-embed-text');
   assert.equal(masked.embeddingProvider, 'openai');
   assert.equal(status.anthropicConfigured, false);
   assert.equal(status.openaiConfigured, true);
   assert.equal(status.githubConfigured, true);
+  assert.equal(status.slackConfigured, true);
+  assert.equal(status.githubWebhookConfigured, true);
   assert.equal(status.embeddingProvider, 'openai');
   assert.equal(status.llmConfigured, true);
 });

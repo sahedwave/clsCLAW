@@ -24,7 +24,7 @@ First launch: click the folder path in the topbar and set:
 - one model provider (Anthropic, OpenAI, or Ollama)
 - optional GitHub token
 
-Anthropic is only required for semantic embeddings. Chat, agents, and plans can use any configured provider.
+Semantic retrieval can use OpenAI, Anthropic, or a local Ollama embedding model when configured. Chat, agents, and plans can use any configured provider.
 
 ## Tests
 
@@ -75,7 +75,7 @@ node --test
 - Relevance scoring: token overlap + symbol match + filename match + recency.
 - Chunk selection: picks the highest-scoring 100-line chunks within a token budget.
 - Keyword retrieval always works offline.
-- Optional semantic embeddings use Anthropic when configured.
+- Optional semantic embeddings use OpenAI, Anthropic, or local Ollama when configured.
 
 ### Skills (`src/skills/skills.js`)
 - Each skill is a real `execute(projectRoot)` function, not a prompt string.
@@ -95,7 +95,16 @@ node --test
 ### GitHub integration (`src/github/github.js`)
 - Real GitHub REST API v3 — authenticated with personal access token.
 - Clone, status, commit+push (permission-gated), create PR, list PRs, fetch PR diff, submit PR review.
-- Webhooks: code exists but requires a public URL to receive events.
+- Inbound webhooks: `POST /api/github/webhook` with signature verification when `githubWebhookSecret` is configured. Still needs a public URL or tunnel for GitHub to reach your local machine.
+
+### Local auth (`src/auth/authStore.js`)
+- Local username/password auth with scrypt-hashed passwords and persistent sessions.
+- First-run bootstrap creates the local admin account.
+- Additional local users can be created through the auth API.
+
+### Slack integration (`src/connectors/connectorManager.js`)
+- Built-in Slack connector supports posting to a configured incoming webhook.
+- Requires outbound network access and a Slack webhook URL.
 
 ### Live updates (`src/sse.js`)
 - Server-Sent Events replace WebSocket — no `ws` package needed.
@@ -103,15 +112,13 @@ node --test
 
 ---
 
-## What is NOT possible locally (honest)
+## What requires extra infrastructure or is not fully implemented yet
 
 | Feature | Reason |
 |---------|--------|
-| True VM sandbox | Needs Firecracker/gVisor — not local |
-| Embedding-based retrieval | Needs embedding API or local model |
-| Slack integration | Needs outbound webhooks + Slack app setup |
-| GitHub webhook receive | Needs public URL (use ngrok as workaround) |
-| Multi-user / auth | Single user only |
+| True VM sandbox | clsClaw uses Docker/restricted sandboxing today, not VM isolation like Firecracker/gVisor |
+| Direct internet webhook delivery | GitHub or Slack can reach clsClaw only if your machine has a public URL or tunnel |
+| Full multi-user collaboration UX | Local auth/users exist, but the app is still optimized around one operator workspace |
 | Cloud task delegation | By definition requires cloud |
 
 ---

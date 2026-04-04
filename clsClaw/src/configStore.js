@@ -41,6 +41,23 @@ function maskApiKey(key = '') {
   return `${'*'.repeat(Math.max(0, key.length - 4))}${key.slice(-4)}`;
 }
 
+function maskUrlSecret(value = '') {
+  const raw = normalizeString(value);
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const maskedTail = parts.map((part, index) => (
+      index < Math.max(0, parts.length - 1)
+        ? part
+        : `${'*'.repeat(Math.max(4, Math.min(12, part.length)))}`
+    ));
+    return `${parsed.origin}/${maskedTail.join('/')}`;
+  } catch {
+    return maskApiKey(raw);
+  }
+}
+
 function resolveProviderConfig(preferred = {}) {
   const cfg = loadConfig();
   const input = typeof preferred === 'string' ? { anthropic: preferred } : (preferred || {});
@@ -49,7 +66,10 @@ function resolveProviderConfig(preferred = {}) {
   const preferredGithub = firstDefined(input, ['githubToken', 'token']);
   const preferredLocalUrl = firstDefined(input, ['ollamaUrl', 'localUrl']);
   const preferredLocalModel = firstDefined(input, ['ollamaModel', 'localModel']);
+  const preferredLocalEmbeddingModel = firstDefined(input, ['ollamaEmbeddingModel', 'localEmbeddingModel']);
   const preferredEmbeddingProvider = firstDefined(input, ['embeddingProvider', 'semanticProvider']);
+  const preferredSlackWebhookUrl = firstDefined(input, ['slackWebhookUrl']);
+  const preferredGithubWebhookSecret = firstDefined(input, ['githubWebhookSecret']);
 
   return {
     anthropic: normalizeString(
@@ -77,12 +97,27 @@ function resolveProviderConfig(preferred = {}) {
       cfg.ollamaModel ||
       process.env.OLLAMA_MODEL
     ),
+    ollamaEmbeddingModel: normalizeString(
+      preferredLocalEmbeddingModel !== undefined ? preferredLocalEmbeddingModel :
+      cfg.ollamaEmbeddingModel ||
+      process.env.OLLAMA_EMBED_MODEL
+    ),
     embeddingProvider: normalizeString(
       preferredEmbeddingProvider !== undefined ? preferredEmbeddingProvider :
       cfg.embeddingProvider ||
       process.env.EMBEDDING_PROVIDER ||
       'auto'
     ) || 'auto',
+    slackWebhookUrl: normalizeString(
+      preferredSlackWebhookUrl !== undefined ? preferredSlackWebhookUrl :
+      cfg.slackWebhookUrl ||
+      process.env.SLACK_WEBHOOK_URL
+    ),
+    githubWebhookSecret: normalizeString(
+      preferredGithubWebhookSecret !== undefined ? preferredGithubWebhookSecret :
+      cfg.githubWebhookSecret ||
+      process.env.GITHUB_WEBHOOK_SECRET
+    ),
   };
 }
 
@@ -94,7 +129,12 @@ function getMaskedProviderConfig(preferred = {}) {
     githubToken: maskApiKey(resolved.githubToken),
     ollamaUrl: resolved.ollamaUrl,
     ollamaModel: resolved.ollamaModel,
+    ollamaEmbeddingModel: resolved.ollamaEmbeddingModel,
     embeddingProvider: resolved.embeddingProvider || 'auto',
+    slackWebhookUrl: maskUrlSecret(resolved.slackWebhookUrl),
+    slackConfigured: Boolean(resolved.slackWebhookUrl),
+    githubWebhookSecret: maskApiKey(resolved.githubWebhookSecret),
+    githubWebhookConfigured: Boolean(resolved.githubWebhookSecret),
   };
 }
 
@@ -103,14 +143,18 @@ function getProviderStatus(preferred = {}) {
   const localConfigured = Boolean(
     resolved.ollamaUrl ||
     resolved.ollamaModel ||
+    resolved.ollamaEmbeddingModel ||
     process.env.OLLAMA_URL ||
-    process.env.OLLAMA_MODEL
+    process.env.OLLAMA_MODEL ||
+    process.env.OLLAMA_EMBED_MODEL
   );
   return {
     anthropicConfigured: Boolean(resolved.anthropic),
     openaiConfigured: Boolean(resolved.openai),
     githubConfigured: Boolean(resolved.githubToken),
     localConfigured,
+    slackConfigured: Boolean(resolved.slackWebhookUrl),
+    githubWebhookConfigured: Boolean(resolved.githubWebhookSecret),
     embeddingProvider: resolved.embeddingProvider || 'auto',
     llmConfigured: Boolean(resolved.anthropic || resolved.openai || localConfigured),
   };

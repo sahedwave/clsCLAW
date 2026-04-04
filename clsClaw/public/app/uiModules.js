@@ -106,7 +106,7 @@
       rows.push(`
         <div style="display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding:4px 0">
           <span style="color:var(--muted)">${esc(label)}</span>
-          <span style="font-family:var(--mono);font-size:10px;text-align:right">${esc(String(value))}</span>
+          <span style="font-family:var(--mono);font-size:10px;text-align:right">${esc(formatArtifactValue(value))}</span>
         </div>
       `);
     };
@@ -139,7 +139,7 @@
         detailRows.push(`
           <div style="display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding:4px 0">
             <span style="color:var(--muted)">${esc(label)}</span>
-            <span style="text-align:right">${esc(String(value))}</span>
+            <span style="text-align:right">${esc(formatArtifactValue(value))}</span>
           </div>
         `);
       };
@@ -194,6 +194,12 @@
         <div class="discover-grid">${items}</div>
       </div>
     `;
+  }
+
+  function formatArtifactValue(value) {
+    if (value === true) return 'yes';
+    if (value === false) return 'no';
+    return String(value);
   }
 
   function renderComposerGuide({ mode = 'ask', profile = 'deliberate' } = {}) {

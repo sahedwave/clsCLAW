@@ -30,7 +30,9 @@ const ContextEngine = require('./context/contextEngine');
 const SkillRegistry = require('./skills/skills');
 const AutoScheduler = require('./automations/automations');
 const GitHubClient  = require('./github/github');
+const { GitHubWebhookStore, verifyGitHubSignature } = require('./github/webhookStore');
 const MemoryStore   = require('./memory/memoryStore');
+const { AuthStore } = require('./auth/authStore');
 const { diffFileVsProposed, setVersionStore } = require('./diff/diff');
 const { materializePatchDocument } = require('./diff/patchProposal');
 const { ExtensionManager } = require('./extensions/extensionManager');
@@ -79,6 +81,7 @@ const versionStore  = new VersionStore(path.join(DATA_DIR, 'versions'));
 const skillRegistry = new SkillRegistry();
 const extensionManager = new ExtensionManager(path.join(DATA_DIR, 'extensions'));
 const memoryStore   = new MemoryStore(path.join(DATA_DIR, 'memory'));
+const authStore = new AuthStore(path.join(DATA_DIR, 'auth'));
 const agentManager  = new AgentManager({ approvalQueue, permissionGate: permGate });
 const planner       = new Planner({ agentManager, memoryStore });
 const swarmCoordinator = new SwarmCoordinator({ agentManager });
@@ -96,6 +99,7 @@ const connectorManager = new ConnectorManager({
   sandbox,
   webClient,
   githubTokenGetter: () => githubToken,
+  settingsGetter: () => providerConfig,
 });
 const mcpRegistry = new McpRegistry({
   dataFile: path.join(DATA_DIR, 'mcp', 'registry.json'),
@@ -105,6 +109,7 @@ const mcpRegistry = new McpRegistry({
 });
 const imageStore = new ImageStore(path.join(DATA_DIR, 'uploads'));
 const artifactStore = new ArtifactStore(path.join(DATA_DIR, 'artifacts'));
+const webhookStore = new GitHubWebhookStore(path.join(DATA_DIR, 'github', 'webhooks.json'));
 const turnTraceStore = new TurnTraceStore(path.join(DATA_DIR, 'turns'));
 const toolRuntime = new ToolRuntime({
   projectRootGetter: () => projectRoot,
@@ -337,8 +342,10 @@ async function router(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  const auth = authStore.getUserForToken(parseCookies(req).clsclaw_session || '');
 
   if (pathname === '/api/events') {
+    if (authStore.isConfigured() && !auth) return json(res, 401, { error: 'Authentication required', authRequired: true });
     return broadcaster.middleware()(req, res);
   }
 
@@ -357,22 +364,39 @@ async function router(req, res) {
   }
 
   let body = {};
-  if ((method === 'POST' || method === 'PATCH' || method === 'DELETE') && req.headers['content-type']?.includes('application/json')) {
+  let rawBody = '';
+  const wantsRawBody = pathname === '/api/github/webhook' && method === 'POST';
+  if (wantsRawBody) {
+    rawBody = await readRawBody(req);
+    try {
+      body = JSON.parse(rawBody || '{}');
+    } catch {
+      body = {};
+    }
+  } else if ((method === 'POST' || method === 'PATCH' || method === 'DELETE') && req.headers['content-type']?.includes('application/json')) {
     body = await readBody(req);
   }
 
   const q = parsed.query;
 
+  const publicApiPaths = new Set(['/api/auth/status', '/api/auth/bootstrap', '/api/auth/login', '/api/github/webhook']);
+  if (pathname.startsWith('/api/') && pathname !== '/api/events' && !publicApiPaths.has(pathname)) {
+    if (authStore.isConfigured() && !auth) {
+      return json(res, 401, { error: 'Authentication required', authRequired: true });
+    }
+  }
+
   try {
-    await handleAPI(pathname, method, body, q, res, req);
+    await handleAPI(pathname, method, body, q, res, req, { auth, rawBody });
   } catch (err) {
     json(res, 500, { error: err.message });
   }
 }
 
-async function handleAPI(pathname, method, body, q, res, req) {
+async function handleAPI(pathname, method, body, q, res, req, runtime = {}) {
   const is = (route, expectedMethod) => pathname === route && method === expectedMethod;
   const uploadMatch = pathname.match(/^\/api\/uploads\/([a-z0-9-]+)$/i);
+  const auth = runtime.auth || null;
 
   if (uploadMatch && method === 'GET') {
     try {
@@ -385,6 +409,60 @@ async function handleAPI(pathname, method, body, q, res, req) {
       return;
     } catch (err) {
       return json(res, 404, { error: err.message });
+    }
+  }
+
+  if (is('/api/auth/status', 'GET')) {
+    return json(res, 200, {
+      configured: authStore.isConfigured(),
+      authenticated: Boolean(auth),
+      bootstrapRequired: !authStore.isConfigured(),
+      user: auth?.user || null,
+    });
+  }
+  if (is('/api/auth/bootstrap', 'POST')) {
+    try {
+      const user = authStore.bootstrap({
+        username: body.username,
+        password: body.password,
+        displayName: body.displayName,
+        role: 'admin',
+      });
+      const session = authStore.createSession(user.id);
+      setCookie(res, 'clsclaw_session', session.token);
+      return json(res, 200, {
+        ok: true,
+        configured: true,
+        authenticated: true,
+        user: session.user,
+      });
+    } catch (err) {
+      return json(res, 400, { error: err.message });
+    }
+  }
+  if (is('/api/auth/login', 'POST')) {
+    const user = authStore.authenticate(body.username, body.password);
+    if (!user) return json(res, 401, { error: 'Invalid username or password' });
+    const session = authStore.createSession(user.id);
+    setCookie(res, 'clsclaw_session', session.token);
+    return json(res, 200, { ok: true, authenticated: true, user: session.user });
+  }
+  if (is('/api/auth/logout', 'POST')) {
+    const cookies = parseCookies(req);
+    if (cookies.clsclaw_session) authStore.revokeSession(cookies.clsclaw_session);
+    clearCookie(res, 'clsclaw_session');
+    return json(res, 200, { ok: true });
+  }
+  if (is('/api/auth/users', 'GET')) {
+    if (auth?.user?.role !== 'admin') return json(res, 403, { error: 'Admin access required' });
+    return json(res, 200, authStore.listUsers());
+  }
+  if (is('/api/auth/users', 'POST')) {
+    if (auth?.user?.role !== 'admin') return json(res, 403, { error: 'Admin access required' });
+    try {
+      return json(res, 200, { ok: true, user: authStore.createUser(body || {}) });
+    } catch (err) {
+      return json(res, 400, { error: err.message });
     }
   }
 
@@ -411,7 +489,10 @@ async function handleAPI(pathname, method, body, q, res, req) {
       openaiKey,
       ollamaUrl,
       ollamaModel,
+      ollamaEmbeddingModel,
       embeddingProvider,
+      slackWebhookUrl,
+      githubWebhookSecret,
     } = body;
     if (root) {
       if (!fs.existsSync(root)) return json(res, 400, { error: 'Path does not exist' });
@@ -425,7 +506,10 @@ async function handleAPI(pathname, method, body, q, res, req) {
     else if (Object.prototype.hasOwnProperty.call(body, 'token')) resolvedInput.githubToken = token;
     if (Object.prototype.hasOwnProperty.call(body, 'ollamaUrl')) resolvedInput.ollamaUrl = ollamaUrl;
     if (Object.prototype.hasOwnProperty.call(body, 'ollamaModel')) resolvedInput.ollamaModel = ollamaModel;
+    if (Object.prototype.hasOwnProperty.call(body, 'ollamaEmbeddingModel')) resolvedInput.ollamaEmbeddingModel = ollamaEmbeddingModel;
     if (Object.prototype.hasOwnProperty.call(body, 'embeddingProvider')) resolvedInput.embeddingProvider = embeddingProvider;
+    if (Object.prototype.hasOwnProperty.call(body, 'slackWebhookUrl')) resolvedInput.slackWebhookUrl = slackWebhookUrl;
+    if (Object.prototype.hasOwnProperty.call(body, 'githubWebhookSecret')) resolvedInput.githubWebhookSecret = githubWebhookSecret;
     const resolvedProviders = resolveProviderConfig(resolvedInput);
     providerConfig = {
       ...providerConfig,
@@ -440,7 +524,10 @@ async function handleAPI(pathname, method, body, q, res, req) {
       githubToken,
       ollamaUrl: providerConfig.ollamaUrl,
       ollamaModel: providerConfig.ollamaModel,
+      ollamaEmbeddingModel: providerConfig.ollamaEmbeddingModel,
       embeddingProvider: providerConfig.embeddingProvider,
+      slackWebhookUrl: providerConfig.slackWebhookUrl,
+      githubWebhookSecret: providerConfig.githubWebhookSecret,
     });
     return json(res, 200, {
       ok: true,
@@ -470,7 +557,10 @@ async function handleAPI(pathname, method, body, q, res, req) {
     else if (Object.prototype.hasOwnProperty.call(body, 'token')) payload.githubToken = body.token;
     if (Object.prototype.hasOwnProperty.call(body, 'ollamaUrl')) payload.ollamaUrl = body.ollamaUrl;
     if (Object.prototype.hasOwnProperty.call(body, 'ollamaModel')) payload.ollamaModel = body.ollamaModel;
+    if (Object.prototype.hasOwnProperty.call(body, 'ollamaEmbeddingModel')) payload.ollamaEmbeddingModel = body.ollamaEmbeddingModel;
     if (Object.prototype.hasOwnProperty.call(body, 'embeddingProvider')) payload.embeddingProvider = body.embeddingProvider;
+    if (Object.prototype.hasOwnProperty.call(body, 'slackWebhookUrl')) payload.slackWebhookUrl = body.slackWebhookUrl;
+    if (Object.prototype.hasOwnProperty.call(body, 'githubWebhookSecret')) payload.githubWebhookSecret = body.githubWebhookSecret;
     providerConfig = resolveProviderConfig(payload);
     githubToken = providerConfig.githubToken;
     contextEngine.setProviderConfig(providerConfig);
@@ -481,7 +571,10 @@ async function handleAPI(pathname, method, body, q, res, req) {
       githubToken,
       ollamaUrl: providerConfig.ollamaUrl,
       ollamaModel: providerConfig.ollamaModel,
+      ollamaEmbeddingModel: providerConfig.ollamaEmbeddingModel,
       embeddingProvider: providerConfig.embeddingProvider,
+      slackWebhookUrl: providerConfig.slackWebhookUrl,
+      githubWebhookSecret: providerConfig.githubWebhookSecret,
     });
     return json(res, 200, {
       ok: true,
@@ -589,6 +682,10 @@ async function handleAPI(pathname, method, body, q, res, req) {
         ...providerStatus,
         ollamaReachable,
       },
+      auth: {
+        configured: authStore.isConfigured(),
+        authenticated: Boolean(auth),
+      },
       localOwnership: {
         projectRoot,
         artifactsStoredLocally: artifactStore.list(1).length >= 0,
@@ -628,6 +725,12 @@ async function handleAPI(pathname, method, body, q, res, req) {
         anthropicConfigured: providerStatus.anthropicConfigured,
         openaiConfigured: providerStatus.openaiConfigured,
         localConfigured: providerStatus.localConfigured,
+        slackConfigured: providerStatus.slackConfigured,
+        githubWebhookConfigured: providerStatus.githubWebhookConfigured,
+      },
+      auth: {
+        configured: authStore.isConfigured(),
+        authenticated: Boolean(auth),
       },
       remoteInferencePossible: Boolean(providerStatus.anthropicConfigured || providerStatus.openaiConfigured),
       localOnlyReady: Boolean(providerStatus.localConfigured),
@@ -1277,7 +1380,7 @@ async function handleAPI(pathname, method, body, q, res, req) {
       contextEngine.setProviderConfig(resolvedProviders);
       const stats = await contextEngine.buildIndex(projectRoot, {
         providerConfig: resolvedProviders,
-        buildEmbeddings: !!resolvedProviders.openai || !!resolvedProviders.anthropic,
+        buildEmbeddings: !!resolvedProviders.openai || !!resolvedProviders.anthropic || !!resolvedProviders.ollamaUrl || !!resolvedProviders.ollamaModel || !!resolvedProviders.ollamaEmbeddingModel,
       });
       return json(res, 200, { ok: true, ...stats });
     } catch (err) { return json(res, 500, { error: err.message }); }
@@ -1302,8 +1405,8 @@ async function handleAPI(pathname, method, body, q, res, req) {
   
   if (is('/api/context/reindex', 'POST')) {
     const resolvedProviders = resolveModelProviders(body.apiKey);
-    if (!resolvedProviders.openai && !resolvedProviders.anthropic) {
-      return json(res, 400, { error: 'An OpenAI or Anthropic embedding provider is required for reindex' });
+    if (!resolvedProviders.openai && !resolvedProviders.anthropic && !resolvedProviders.ollamaUrl && !resolvedProviders.ollamaModel && !resolvedProviders.ollamaEmbeddingModel) {
+      return json(res, 400, { error: 'An embedding provider or local embedding model is required for reindex' });
     }
     try {
       const result = await contextEngine.reindex(resolvedProviders);
@@ -1602,6 +1705,20 @@ async function handleAPI(pathname, method, body, q, res, req) {
       return json(res, 200, await connectorManager.readResource(body.connectorId, body.uri, body.args || {}));
     } catch (err) { return json(res, 400, { error: err.message }); }
   }
+  if (is('/api/slack/notify', 'POST')) {
+    try {
+      const title = String(body.title || 'clsClaw update').trim();
+      const summary = String(body.summary || '').trim();
+      const urlText = String(body.url || '').trim();
+      const lines = [title, summary, urlText].filter(Boolean);
+      if (!lines.length) return json(res, 400, { error: 'title or summary required' });
+      const sent = await connectorManager.run('slack', 'send-message', {
+        text: lines.join('\n\n'),
+        username: String(body.username || 'clsClaw'),
+      });
+      return json(res, 200, sent);
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
   const skillRunM = pathname.match(/^\/api\/skills\/([^/]+)\/run$/);
   if (skillRunM) {
     try {
@@ -1679,6 +1796,58 @@ async function handleAPI(pathname, method, body, q, res, req) {
     const tok = body.token || githubToken;
     if (!tok) throw new Error('GitHub token required');
     return new GitHubClient(tok);
+  }
+
+  if (is('/api/github/webhook', 'POST')) {
+    const verification = verifyGitHubSignature(
+      runtime.rawBody || JSON.stringify(body || {}),
+      providerConfig.githubWebhookSecret,
+      req.headers['x-hub-signature-256']
+    );
+    if (!verification.ok) return json(res, 401, { error: verification.reason });
+    const artifact = artifactStore.create({
+      type: 'github-webhook',
+      title: `GitHub webhook: ${String(req.headers['x-github-event'] || 'event')}`,
+      summary: [body?.action, body?.repository?.full_name, body?.sender?.login].filter(Boolean).join(' · ') || 'GitHub webhook delivery received',
+      projectRoot,
+      content: JSON.stringify(body || {}, null, 2),
+      metadata: {
+        deliveryId: String(req.headers['x-github-delivery'] || ''),
+        event: String(req.headers['x-github-event'] || ''),
+        action: body?.action || '',
+        repository: body?.repository?.full_name || '',
+        sender: body?.sender?.login || '',
+      },
+    });
+    const event = webhookStore.ingest({
+      event: req.headers['x-github-event'],
+      deliveryId: req.headers['x-github-delivery'],
+      payload: body,
+      action: body?.action,
+      repository: body?.repository?.full_name,
+      sender: body?.sender?.login,
+      artifactId: artifact.id,
+    });
+    automations.addExternalNotification({
+      kind: 'github-webhook',
+      title: `GitHub ${event.event}`,
+      summary: event.summary,
+      projectRoot,
+      artifactId: artifact.id,
+      createdAt: event.receivedAt,
+      sources: [{
+        type: 'github',
+        title: event.repository || event.event,
+        source: event.deliveryId,
+        url: body?.repository?.html_url || body?.pull_request?.html_url || body?.issue?.html_url || '',
+        snippet: event.summary,
+      }],
+      highlights: [event.event, event.action, event.repository].filter(Boolean),
+    });
+    return json(res, 200, { ok: true, deliveryId: event.deliveryId });
+  }
+  if (is('/api/github/webhooks/recent', 'GET')) {
+    return json(res, 200, webhookStore.list(Number(q.limit) || 20));
   }
 
   if (is('/api/github/user', 'POST')) {
@@ -1805,11 +1974,41 @@ function json(res, status, data) {
   res.end(body);
 }
 
+function parseCookies(req) {
+  return String(req.headers.cookie || '')
+    .split(';')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .reduce((acc, pair) => {
+      const index = pair.indexOf('=');
+      if (index === -1) return acc;
+      acc[decodeURIComponent(pair.slice(0, index))] = decodeURIComponent(pair.slice(index + 1));
+      return acc;
+    }, {});
+}
+
+function setCookie(res, name, value, { maxAge = 60 * 60 * 24 * 14 } = {}) {
+  res.setHeader('Set-Cookie', `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`);
+}
+
+function clearCookie(res, name) {
+  res.setHeader('Set-Cookie', `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
     req.on('data', chunk => { data += chunk; if (data.length > 20*1024*1024) req.destroy(new Error('Body too large')); });
     req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { resolve({}); } });
+    req.on('error', reject);
+  });
+}
+
+function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', chunk => { data += chunk; if (data.length > 20 * 1024 * 1024) req.destroy(new Error('Body too large')); });
+    req.on('end', () => resolve(data));
     req.on('error', reject);
   });
 }

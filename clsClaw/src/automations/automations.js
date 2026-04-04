@@ -230,6 +230,31 @@ class AutomationScheduler extends EventEmitter {
   listJobs()             { return [...this._jobs.values()]; }
   listResults(n = 50)    { return this._results.slice(0, n); }
   listNotifications(n = 50) { return this._notifications.slice(0, n); }
+  addExternalNotification(notification = {}) {
+    const created = {
+      id: uuid(),
+      jobId: notification.jobId || null,
+      runId: notification.runId || null,
+      jobName: notification.jobName || notification.title || 'External event',
+      heartbeatKind: notification.heartbeatKind || notification.kind || 'external',
+      status: notification.status || 'success',
+      summary: notification.summary || notification.title || 'External event received',
+      findingsCount: Number(notification.findingsCount) || 0,
+      projectRoot: notification.projectRoot || null,
+      sources: Array.isArray(notification.sources) ? notification.sources.slice(0, 5) : [],
+      highlights: Array.isArray(notification.highlights) ? notification.highlights.slice(0, 4) : [],
+      reviewIds: Array.isArray(notification.reviewIds) ? [...notification.reviewIds] : [],
+      artifactId: notification.artifactId || null,
+      createdAt: Number(notification.createdAt) || Date.now(),
+      acknowledgedAt: null,
+      promotedToMemoryAt: null,
+    };
+    this._notifications.unshift(created);
+    if (this._notifications.length > 200) this._notifications = this._notifications.slice(0, 200);
+    this._saveNotifications();
+    this.emit('notification:new', created);
+    return created;
+  }
   acknowledgeNotification(id) {
     const notification = this._notifications.find((item) => item.id === id);
     if (!notification) return { ok: false, error: 'Not found' };

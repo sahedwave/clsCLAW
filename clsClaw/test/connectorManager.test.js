@@ -78,6 +78,7 @@ function makeManager(workspace, overrides = {}) {
       searchRepositories: async (query) => ({ items: [{ full_name: query }] }),
     })),
     githubTokenGetter: overrides.githubTokenGetter || (() => 'gh-test-token'),
+    settingsGetter: overrides.settingsGetter || (() => ({})),
   });
 }
 
@@ -86,13 +87,37 @@ test('connector catalog exposes workspace, skills, automations, and github', () 
   try {
     const manager = makeManager(workspace);
     const connectors = manager.list();
-    assert.deepEqual(connectors.map((connector) => connector.id), ['workspace', 'skills', 'automations', 'docs', 'github']);
+    assert.deepEqual(connectors.map((connector) => connector.id), ['workspace', 'skills', 'automations', 'docs', 'slack', 'github']);
     const github = connectors.find((connector) => connector.id === 'github');
     assert.equal(github.trust.requiresAuth, true);
     assert.equal(github.trust.requiresNetwork, true);
+    const slack = connectors.find((connector) => connector.id === 'slack');
+    assert.equal(slack.trust.requiresAuth, true);
     const workspaceConnector = connectors.find((connector) => connector.id === 'workspace');
     assert.equal(workspaceConnector.trust.level, 'local');
   } finally {
+    cleanup(workspace);
+  }
+});
+
+test('slack connector posts to the configured webhook', async () => {
+  const workspace = makeWorkspace();
+  const originalFetch = global.fetch;
+  try {
+    const seen = [];
+    global.fetch = async (url, options) => {
+      seen.push({ url, options });
+      return { ok: true, text: async () => 'ok' };
+    };
+    const manager = makeManager(workspace, {
+      settingsGetter: () => ({ slackWebhookUrl: 'https://hooks.slack.com/services/T000/B000/secret' }),
+    });
+    await manager.run('slack', 'send-message', { text: 'hello from clsClaw', username: 'clsClaw' });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].url, 'https://hooks.slack.com/services/T000/B000/secret');
+    assert.match(seen[0].options.body, /hello from clsClaw/);
+  } finally {
+    global.fetch = originalFetch;
     cleanup(workspace);
   }
 });

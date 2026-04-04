@@ -662,6 +662,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
       <span class="cwd-path" id="cwd-disp">loading...</span>
     </div>
     <div class="topbar-right">
+      <button class="ctx-btn" id="auth-badge" onclick="openSettings()">auth: guest</button>
       <button class="ctx-btn" id="idx-btn" onclick="buildIndex()">index project</button>
       <div id="api-key-warning" class="apiwarn" style="display:none">⚠ No LLM provider configured</div>
       <div id="health-indicator" class="ctx-btn">health: unknown</div>
@@ -916,6 +917,17 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
           <div class="gh-out" id="gh-review-out"></div>
         </div>
         <div class="gh-sec">
+          <span class="gh-lbl">Webhook inbox</span>
+          <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:8px">
+            Configure GitHub to send events to <span style="font-family:var(--mono);color:var(--accent2)" id="gh-webhook-url-preview">/api/github/webhook</span> using the webhook secret from Settings.
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="gh-btn" onclick="loadGitHubWebhooks()">Load recent webhooks</button>
+            <button class="gh-btn" onclick="copyGitHubWebhookUrl()">Copy webhook URL</button>
+          </div>
+          <div class="gh-out" id="gh-webhooks-out"></div>
+        </div>
+        <div class="gh-sec">
           <span class="gh-lbl">Compare refs</span>
           <input class="gh-inp" type="text" id="gh-compare-base" placeholder="base ref (e.g. main)" />
           <input class="gh-inp" type="text" id="gh-compare-head" placeholder="head ref (e.g. feature-branch)" />
@@ -1147,19 +1159,52 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:10px 0}
     <input type="text" id="cfg-ollama-url" placeholder="http://localhost:11434/api/generate" />
     <label>Ollama model</label>
     <input type="text" id="cfg-ollama-model" placeholder="qwen2.5-coder:7b" />
+    <label>Ollama embedding model</label>
+    <input type="text" id="cfg-ollama-embedding-model" placeholder="nomic-embed-text" />
     <label>Semantic retrieval provider</label>
     <select id="cfg-embedding-provider">
       <option value="auto">Auto</option>
+      <option value="ollama">Ollama (local)</option>
       <option value="openai">OpenAI</option>
       <option value="anthropic">Anthropic</option>
       <option value="disabled">Disabled</option>
     </select>
+    <label>Slack webhook URL</label>
+    <input type="password" id="cfg-slack-webhook" placeholder="https://hooks.slack.com/services/..." />
+    <label>GitHub webhook secret</label>
+    <input type="password" id="cfg-github-webhook-secret" placeholder="shared secret for inbound webhooks" />
     <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-top:8px">
-      Any one model provider is enough for chat, agents, and plans. Semantic retrieval can use OpenAI or Anthropic, or stay keyword-only.
+      Any one model provider is enough for chat, agents, and plans. Semantic retrieval can use Ollama locally, OpenAI, Anthropic, or stay keyword-only.
+    </div>
+    <div style="margin-top:14px;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg3)">
+      <div class="row" style="margin-bottom:8px">
+        <div style="font-size:12px;font-weight:700;flex:1">Local auth</div>
+        <button class="gh-btn" style="width:auto;padding:6px 10px;margin:0" onclick="createAuthUser()" id="auth-add-user-btn">add user</button>
+        <button class="gh-btn" style="width:auto;padding:6px 10px;margin:0" onclick="logoutAuth()">sign out</button>
+      </div>
+      <div id="auth-settings-summary" style="font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:8px">Loading auth state...</div>
+      <div id="auth-users-list" style="display:flex;flex-direction:column;gap:8px"></div>
     </div>
     <div class="modal-row">
       <button class="modal-btn" onclick="closeModal('modal-settings')">Cancel</button>
       <button class="modal-btn primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-ov" id="modal-auth" style="display:none">
+  <div class="modal">
+    <h3 id="auth-title">Sign in</h3>
+    <div id="auth-copy" style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:10px">Authenticate to unlock the local clsClaw workspace.</div>
+    <label>Username</label>
+    <input type="text" id="auth-username" placeholder="shahed" />
+    <label id="auth-display-label" style="display:none">Display name</label>
+    <input type="text" id="auth-display-name" placeholder="Md Shahed Rahman" style="display:none" />
+    <label>Password</label>
+    <input type="password" id="auth-password" placeholder="At least 8 characters" />
+    <div class="modal-row">
+      <button class="modal-btn" id="auth-cancel-btn" onclick="closeModal('modal-auth')" style="display:none">Cancel</button>
+      <button class="modal-btn primary" id="auth-submit-btn" onclick="submitAuth()">Continue</button>
     </div>
   </div>
 </div>
@@ -1305,7 +1350,10 @@ let providerDraft = {
   openaiKey: '',
   ollamaUrl: '',
   ollamaModel: '',
+  ollamaEmbeddingModel: '',
   embeddingProvider: 'auto',
+  slackWebhookUrl: '',
+  githubWebhookSecret: '',
 };
 let providerStatus = {
   anthropicConfigured: false,
@@ -1313,6 +1361,14 @@ let providerStatus = {
   localConfigured: false,
   llmConfigured: false,
   embeddingProvider: 'auto',
+  slackConfigured: false,
+  githubWebhookConfigured: false,
+};
+let authState = {
+  configured: false,
+  authenticated: false,
+  bootstrapRequired: false,
+  user: null,
 };
 let ghToken = localStorage.getItem('cx4_gh') || '';
 let projectRoot = '';
@@ -1350,8 +1406,148 @@ let missionState = {
   updatedAt: null,
 };
 
+async function loadAuthStatus() {
+  const state = await fetch('/api/auth/status')
+    .then((response) => response.json())
+    .catch(() => ({ configured: false, authenticated: false, bootstrapRequired: true, user: null }));
+  authState = {
+    configured: !!state.configured,
+    authenticated: !!state.authenticated,
+    bootstrapRequired: !!state.bootstrapRequired,
+    user: state.user || null,
+  };
+  updateAuthChrome();
+  return authState;
+}
 
-async function init() {
+function updateAuthChrome() {
+  const badge = document.getElementById('auth-badge');
+  if (!badge) return;
+  if (!authState.configured) {
+    badge.textContent = 'auth: bootstrap';
+    return;
+  }
+  if (!authState.authenticated) {
+    badge.textContent = 'auth: sign in';
+    return;
+  }
+  const role = authState.user?.role ? ` · ${authState.user.role}` : '';
+  badge.textContent = `${authState.user?.username || 'user'}${role}`;
+}
+
+function openAuthModal(allowClose = false) {
+  const modal = document.getElementById('modal-auth');
+  if (!modal) return;
+  const bootstrap = !!authState.bootstrapRequired;
+  document.getElementById('auth-title').textContent = bootstrap ? 'Create local admin account' : 'Sign in';
+  document.getElementById('auth-copy').textContent = bootstrap
+    ? 'Set the first local admin account for this clsClaw workspace.'
+    : 'Authenticate to unlock the local clsClaw workspace.';
+  document.getElementById('auth-display-label').style.display = bootstrap ? 'block' : 'none';
+  document.getElementById('auth-display-name').style.display = bootstrap ? 'block' : 'none';
+  document.getElementById('auth-cancel-btn').style.display = allowClose ? 'inline-flex' : 'none';
+  modal.style.display = 'flex';
+}
+
+function closeAuthModalIfAllowed() {
+  if (authState.authenticated) closeModal('modal-auth');
+}
+
+async function submitAuth() {
+  const username = document.getElementById('auth-username').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const displayName = document.getElementById('auth-display-name').value.trim();
+  const endpoint = authState.bootstrapRequired ? '/api/auth/bootstrap' : '/api/auth/login';
+  const payload = authState.bootstrapRequired ? { username, password, displayName } : { username, password };
+  const result = await api('POST', endpoint, payload).catch((err) => {
+    toast(err.message, 'err');
+    return null;
+  });
+  if (!result) return;
+  document.getElementById('auth-username').value = '';
+  document.getElementById('auth-password').value = '';
+  document.getElementById('auth-display-name').value = '';
+  authState = {
+    configured: true,
+    authenticated: true,
+    bootstrapRequired: false,
+    user: result.user || null,
+  };
+  updateAuthChrome();
+  closeModal('modal-auth');
+  await init(true);
+}
+
+async function logoutAuth() {
+  await api('POST', '/api/auth/logout', {}).catch(() => null);
+  authState = {
+    configured: true,
+    authenticated: false,
+    bootstrapRequired: false,
+    user: null,
+  };
+  updateAuthChrome();
+  openAuthModal(false);
+}
+
+async function loadAuthUsers() {
+  const summary = document.getElementById('auth-settings-summary');
+  const list = document.getElementById('auth-users-list');
+  const addUserBtn = document.getElementById('auth-add-user-btn');
+  if (!summary || !list) return;
+  const role = authState.user?.role || 'viewer';
+  if (!authState.authenticated) {
+    summary.textContent = 'You are not signed in.';
+    list.innerHTML = '';
+    if (addUserBtn) addUserBtn.style.display = 'none';
+    return;
+  }
+  summary.textContent = `Signed in as ${authState.user?.displayName || authState.user?.username || 'user'} (${role}).`;
+  if (addUserBtn) addUserBtn.style.display = role === 'admin' ? 'inline-flex' : 'none';
+  if (role !== 'admin') {
+    list.innerHTML = `<div style="font-size:11px;color:var(--muted)">Only admins can create or list local users.</div>`;
+    return;
+  }
+  const users = await api('GET', '/api/auth/users').catch(() => []);
+  list.innerHTML = (users || []).map((user) => `
+    <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--bg2);display:flex;align-items:center;gap:8px">
+      <div style="flex:1">
+        <div style="font-size:12px;font-weight:700">${esc(user.displayName || user.username)}</div>
+        <div style="font-size:10px;font-family:var(--mono);color:var(--muted)">${esc(user.username)} · ${esc(user.role || 'member')}</div>
+      </div>
+      <span class="review-anchor exact">${esc(user.disabled ? 'disabled' : 'active')}</span>
+    </div>
+  `).join('') || `<div style="font-size:11px;color:var(--muted)">No local users yet.</div>`;
+}
+
+async function createAuthUser() {
+  if (authState.user?.role !== 'admin') {
+    toast('Admin access required', 'err');
+    return;
+  }
+  const username = prompt('New username');
+  if (username === null) return;
+  const password = prompt('Temporary password (min 8 characters)');
+  if (password === null) return;
+  const displayName = prompt('Display name (optional)') ?? '';
+  const role = prompt('Role: admin, member, or viewer', 'member');
+  const result = await api('POST', '/api/auth/users', { username, password, displayName, role }).catch((err) => {
+    toast(err.message, 'err');
+    return null;
+  });
+  if (!result?.ok) return;
+  toast(`✓ Added user ${result.user.username}`, 'ok');
+  loadAuthUsers();
+}
+
+
+async function init(isRetry = false) {
+  await loadAuthStatus();
+  if (!authState.authenticated) {
+    if (!isRetry) renderMissionControl();
+    openAuthModal(false);
+    return;
+  }
   const cfg = await api('GET', '/api/config').catch(() => ({}));
   projectRoot = cfg.projectRoot || '';
   currentBrowseDir = projectRoot;
@@ -1376,6 +1572,7 @@ async function init() {
   await loadConnectors();
   await loadSwarmSessions();
   await loadAutomationInbox();
+  await loadGitHubWebhooks();
   await loadChanges();
   await loadPermissions();
   await refreshCtxStats();
@@ -1387,6 +1584,8 @@ async function init() {
   await loadCompanionFeed();
   await refreshHealthPill();
   updateApiKeyWarning();
+  const webhookPreview = document.getElementById('gh-webhook-url-preview');
+  if (webhookPreview) webhookPreview.textContent = `${location.origin}/api/github/webhook`;
 }
 
 
@@ -1485,11 +1684,13 @@ function connectWS() {
       case 'notification:new':
         loadAutomationInbox();
         loadCompanionFeed();
+        if (currentView === 'github') loadGitHubWebhooks();
         toast('🔔 Heartbeat inbox: ' + (d.notification?.jobName || 'automation update'), d.notification?.status === 'error' ? 'err' : 'warn');
         break;
       case 'notification:updated':
         loadAutomationInbox();
         loadCompanionFeed();
+        if (currentView === 'github') loadGitHubWebhooks();
         break;
 
       case 'plan:created':
@@ -1624,6 +1825,13 @@ async function api(method, path, body) {
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
   const data = await r.json().catch(() => ({}));
+  if (r.status === 401) {
+    authState = {
+      ...authState,
+      authenticated: false,
+    };
+    openAuthModal(false);
+  }
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
 }
@@ -1716,6 +1924,7 @@ function setView(v) {
   if (v === 'agents')   loadAgents();
   if (v === 'apps')     loadConnectors();
   if (v === 'auto')     loadJobs();
+  if (v === 'github')   loadGitHubWebhooks();
   if (v === 'changes')  { loadChanges(); resetBadge('changes-badge'); }
   if (v === 'perms')    { loadPermissions(); resetBadge('perms-badge'); }
   if (v === 'ctx')      refreshCtxStats();
@@ -3196,6 +3405,7 @@ async function loadAutomationInbox() {
         <div style="font-size:10px;font-family:var(--mono);color:var(--muted);flex:1">${timeAgo(item.createdAt)}${item.findingsCount ? ` · findings: ${item.findingsCount}` : ''}${item.reviewIds?.length ? ` · reviews: ${item.reviewIds.length}` : ''}${item.artifactId ? ' · artifact saved' : ''}</div>
         ${item.reviewIds?.length ? `<button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="openAutomationNotificationReview('${item.reviewIds[0]}')">open review</button>` : ''}
         ${item.artifactId ? `<button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="openArtifact('${item.artifactId}')">open artifact</button>` : ''}
+        <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="sendNotificationToSlack('${item.id}')">send to Slack</button>
         ${item.sources?.length ? `<button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="openAutomationNotificationSource('${escJs(item.sources[0].url || item.sources[0].source || '')}')">open source</button>` : ''}
         ${item.promotedToMemoryAt ? `<span style="font-size:10px;font-family:var(--mono);color:var(--muted)">saved</span>` : `<button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="saveAutomationNotificationToMemory('${item.id}')">save memory</button>`}
         ${item.acknowledgedAt ? `<span style="font-size:10px;font-family:var(--mono);color:var(--muted)">acked</span>` : `<button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="ackAutomationInbox('${item.id}')">ack</button>`}
@@ -3246,6 +3456,25 @@ async function saveAutomationNotificationToMemory(id) {
   }
 }
 
+async function sendNotificationToSlack(id) {
+  const notifications = await api('GET', '/api/automations/notifications').catch(() => []);
+  const item = notifications.find((entry) => entry.id === id);
+  if (!item) {
+    toast('Notification not found', 'err');
+    return;
+  }
+  const url = item.sources?.[0]?.url || '';
+  const sent = await api('POST', '/api/slack/notify', {
+    title: item.jobName || 'clsClaw heartbeat',
+    summary: item.summary || '',
+    url,
+  }).catch((err) => {
+    toast(err.message, 'err');
+    return null;
+  });
+  if (sent?.ok) toast('✓ Sent to Slack', 'ok');
+}
+
 async function createHeartbeatPreset(presetId) {
   const r = await api('POST', '/api/heartbeat/create', { presetId }).catch(err => { toast(err.message, 'err'); return null; });
   if (r?.ok) {
@@ -3273,6 +3502,7 @@ async function loadArtifacts() {
       <div style="font-size:11px;color:var(--muted);line-height:1.5">${esc(artifact.summary || 'No summary')}</div>
       <div style="display:flex;gap:8px;align-items:center">
         <div style="font-size:10px;font-family:var(--mono);color:var(--muted);flex:1">${timeAgo(artifact.createdAt)}</div>
+        <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="sendArtifactToSlack('${artifact.id}')">send to Slack</button>
         <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="openArtifact('${artifact.id}')">open</button>
       </div>
     </div>
@@ -3305,6 +3535,9 @@ async function openArtifact(id) {
         <div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">${esc(artifact.type || 'artifact')} · ${timeAgo(artifact.createdAt)}</div>
         ${artifact.summary ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">${esc(artifact.summary)}</div>` : ''}
         ${renderArtifactMetadataRows({ ...(artifact.metadata || {}), projectRoot: artifact.projectRoot || '' })}
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:8px">
+          <button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="sendArtifactToSlack('${artifact.id}')">send to Slack</button>
+        </div>
         <div style="margin-top:10px">
           <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--hint);margin-bottom:4px">Content</div>
           ${renderArtifactParsedContent(artifact)}
@@ -3313,6 +3546,22 @@ async function openArtifact(id) {
     `;
   }
   setView('apps');
+}
+
+async function sendArtifactToSlack(id) {
+  const artifact = await api('GET', `/api/artifacts/${id}`).catch(() => null);
+  if (!artifact) {
+    toast('Artifact unavailable', 'err');
+    return;
+  }
+  const sent = await api('POST', '/api/slack/notify', {
+    title: artifact.title || 'clsClaw artifact',
+    summary: artifact.summary || artifact.type || '',
+  }).catch((err) => {
+    toast(err.message, 'err');
+    return null;
+  });
+  if (sent?.ok) toast('✓ Sent to Slack', 'ok');
 }
 
 async function triggerJob(id) {
@@ -3415,6 +3664,40 @@ async function ghLoadPRThreads() {
   });
   if (!threads) return;
   showGhOut('gh-review-out', renderPRThreads(threads), false, true);
+}
+
+async function loadGitHubWebhooks() {
+  const events = await api('GET', '/api/github/webhooks/recent?limit=12').catch((err) => {
+    showGhOut('gh-webhooks-out', err.message, true);
+    return null;
+  });
+  if (!events) return;
+  if (!events.length) {
+    showGhOut('gh-webhooks-out', 'No webhook deliveries yet.');
+    return;
+  }
+  const html = events.map((event) => `
+    <div style="padding:8px 0;border-bottom:1px dashed var(--border)">
+      <div style="font-size:10px;font-family:var(--mono);color:var(--accent2)">${esc(event.event || 'event')} · ${esc(event.action || 'received')} · ${timeAgo(event.receivedAt)}</div>
+      <div style="font-size:11px;color:var(--text);margin-top:4px">${esc(event.summary || 'GitHub webhook')}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+        ${event.repository ? `<span class="review-anchor exact">${esc(event.repository)}</span>` : ''}
+        ${event.sender ? `<span class="review-anchor exact">${esc(event.sender)}</span>` : ''}
+      </div>
+      ${event.artifactId ? `<div style="margin-top:8px"><button class="gh-btn" style="width:auto;padding:4px 8px;margin:0" onclick="openArtifact('${event.artifactId}')">open artifact</button></div>` : ''}
+    </div>
+  `).join('');
+  showGhOut('gh-webhooks-out', html, false, true);
+}
+
+async function copyGitHubWebhookUrl() {
+  const webhookUrl = `${location.origin}/api/github/webhook`;
+  try {
+    await navigator.clipboard.writeText(webhookUrl);
+    toast('✓ Webhook URL copied', 'ok');
+  } catch {
+    prompt('Copy GitHub webhook URL', webhookUrl);
+  }
 }
 
 async function ghCompare() {
@@ -3595,7 +3878,7 @@ async function buildIndex() {
 }
 
 async function reindexEmbeddings() {
-  if (!hasEmbeddingProvider()) { toast('Configure OpenAI or Anthropic for semantic retrieval first', 'err'); return; }
+  if (!hasEmbeddingProvider()) { toast('Configure Ollama, OpenAI, or Anthropic for semantic retrieval first', 'err'); return; }
   const btn = document.getElementById('reindex-btn');
   if (btn) { btn.textContent = 'embedding...'; btn.disabled = true; }
   const r = await api('POST', '/api/context/reindex', { apiKey: currentApiKey() }).catch(err => { toast(err.message, 'err'); return null; });
@@ -5149,6 +5432,12 @@ async function showHealth() {
     row('OpenAI',          h.providers?.openaiConfigured ? 'configured' : 'not configured', h.providers?.openaiConfigured),
     row('Ollama',          h.providers?.ollamaReachable ? 'reachable' : h.providers?.localConfigured ? 'configured' : 'not configured', h.providers?.ollamaReachable),
     row('GitHub',          h.providers?.githubConfigured ? 'configured' : 'not configured', h.providers?.githubConfigured),
+    row('Slack webhook',   h.providers?.slackConfigured ? 'configured' : 'not configured', h.providers?.slackConfigured),
+    row('GitHub webhook',  h.providers?.githubWebhookConfigured ? 'configured' : 'not configured', h.providers?.githubWebhookConfigured),
+
+    section('Access'),
+    row('Local auth',      h.auth?.configured ? 'configured' : 'not configured', h.auth?.configured),
+    row('Session',         h.auth?.authenticated ? 'authenticated' : 'not authenticated', h.auth?.authenticated ? true : null),
 
     section('Reliability'),
     row('Last error',      h.lastError?.message || 'none', h.lastError ? false : true),
@@ -5593,7 +5882,8 @@ function clearAgentStream(agentId) {
 }
 
 function isMaskedSecret(value) {
-  return /^\*{4,}[A-Za-z0-9_-]{0,}$/.test(value || '');
+  const raw = String(value || '');
+  return /^\*{4,}[A-Za-z0-9_-]{0,}$/.test(raw) || (/^https?:\/\//.test(raw) && /\*{4,}/.test(raw));
 }
 
 function applyProviderState(providers) {
@@ -5604,24 +5894,35 @@ function applyProviderState(providers) {
     localConfigured: !!providers.localConfigured,
     llmConfigured: !!providers.llmConfigured,
     embeddingProvider: providers.embeddingProvider || 'auto',
+    slackConfigured: !!providers.slackConfigured,
+    githubWebhookConfigured: !!providers.githubWebhookConfigured,
   };
   providerDraft = {
     anthropicKey: providers.anthropicKey || '',
     openaiKey: providers.openaiKey || '',
     ollamaUrl: providers.ollamaUrl || '',
     ollamaModel: providers.ollamaModel || '',
+    ollamaEmbeddingModel: providers.ollamaEmbeddingModel || '',
     embeddingProvider: providers.embeddingProvider || 'auto',
+    slackWebhookUrl: providers.slackWebhookUrl || '',
+    githubWebhookSecret: providers.githubWebhookSecret || '',
   };
   const anth = document.getElementById('cfg-anthropic');
   const openai = document.getElementById('cfg-openai');
   const ollamaUrl = document.getElementById('cfg-ollama-url');
   const ollamaModel = document.getElementById('cfg-ollama-model');
+  const ollamaEmbeddingModel = document.getElementById('cfg-ollama-embedding-model');
   const embeddingProvider = document.getElementById('cfg-embedding-provider');
+  const slackWebhookUrl = document.getElementById('cfg-slack-webhook');
+  const githubWebhookSecret = document.getElementById('cfg-github-webhook-secret');
   if (anth) anth.value = providerDraft.anthropicKey;
   if (openai) openai.value = providerDraft.openaiKey;
   if (ollamaUrl) ollamaUrl.value = providerDraft.ollamaUrl;
   if (ollamaModel) ollamaModel.value = providerDraft.ollamaModel;
+  if (ollamaEmbeddingModel) ollamaEmbeddingModel.value = providerDraft.ollamaEmbeddingModel;
   if (embeddingProvider) embeddingProvider.value = providerDraft.embeddingProvider || 'auto';
+  if (slackWebhookUrl) slackWebhookUrl.value = providerDraft.slackWebhookUrl;
+  if (githubWebhookSecret) githubWebhookSecret.value = providerDraft.githubWebhookSecret;
 }
 
 function hasAnthropicProvider() {
@@ -5633,10 +5934,14 @@ function hasEmbeddingProvider() {
   const selected = document.getElementById('cfg-embedding-provider')?.value || providerDraft.embeddingProvider || 'auto';
   const anth = document.getElementById('cfg-anthropic')?.value.trim() || providerDraft.anthropicKey;
   const openai = document.getElementById('cfg-openai')?.value.trim() || providerDraft.openaiKey;
+  const ollamaUrl = document.getElementById('cfg-ollama-url')?.value.trim() || providerDraft.ollamaUrl;
+  const ollamaModel = document.getElementById('cfg-ollama-embedding-model')?.value.trim() || providerDraft.ollamaEmbeddingModel || providerDraft.ollamaModel;
   if (selected === 'disabled') return false;
+  if (selected === 'ollama') return !!(providerStatus.localConfigured || ollamaUrl || ollamaModel);
   if (selected === 'openai') return !!(providerStatus.openaiConfigured || (openai && !isMaskedSecret(openai)));
   if (selected === 'anthropic') return !!(providerStatus.anthropicConfigured || (anth && !isMaskedSecret(anth)));
   return (
+    !!(providerStatus.localConfigured || ollamaUrl || ollamaModel) ||
     !!(providerStatus.openaiConfigured || (openai && !isMaskedSecret(openai))) ||
     !!(providerStatus.anthropicConfigured || (anth && !isMaskedSecret(anth)))
   );
@@ -5662,12 +5967,14 @@ function currentApiKey() {
   const openai = document.getElementById('cfg-openai')?.value.trim() || providerDraft.openaiKey;
   const ollamaUrl = document.getElementById('cfg-ollama-url')?.value.trim() || providerDraft.ollamaUrl;
   const ollamaModel = document.getElementById('cfg-ollama-model')?.value.trim() || providerDraft.ollamaModel;
+  const ollamaEmbeddingModel = document.getElementById('cfg-ollama-embedding-model')?.value.trim() || providerDraft.ollamaEmbeddingModel;
   const embeddingProvider = document.getElementById('cfg-embedding-provider')?.value || providerDraft.embeddingProvider || 'auto';
 
   if (anth && !isMaskedSecret(anth)) payload.anthropic = anth;
   if (openai && !isMaskedSecret(openai)) payload.openai = openai;
   if (ollamaUrl) payload.ollamaUrl = ollamaUrl;
   if (ollamaModel) payload.ollamaModel = ollamaModel;
+  if (ollamaEmbeddingModel) payload.ollamaEmbeddingModel = ollamaEmbeddingModel;
   payload.embeddingProvider = embeddingProvider;
 
   return Object.keys(payload).length ? payload : undefined;
@@ -5678,8 +5985,9 @@ async function loadProviderConfig() {
   applyProviderState(cfg?.providers || null);
 }
 
-function openSettings() {
+async function openSettings() {
   document.getElementById('cfg-root').value = projectRoot;
+  await loadAuthUsers();
   document.getElementById('modal-settings').style.display = 'flex';
 }
 
@@ -5690,17 +5998,23 @@ async function saveSettings() {
   const openaiKey = document.getElementById('cfg-openai').value.trim();
   const ollamaUrl = document.getElementById('cfg-ollama-url').value.trim();
   const ollamaModel = document.getElementById('cfg-ollama-model').value.trim();
+  const ollamaEmbeddingModel = document.getElementById('cfg-ollama-embedding-model').value.trim();
   const embeddingProvider = document.getElementById('cfg-embedding-provider').value;
+  const slackWebhookUrl = document.getElementById('cfg-slack-webhook').value.trim();
+  const githubWebhookSecret = document.getElementById('cfg-github-webhook-secret').value.trim();
 
   const payload = {
     root,
     token: githubToken,
     ollamaUrl,
     ollamaModel,
+    ollamaEmbeddingModel,
     embeddingProvider,
   };
   if (!isMaskedSecret(anthropicKey)) payload.anthropicKey = anthropicKey;
   if (!isMaskedSecret(openaiKey)) payload.openaiKey = openaiKey;
+  if (!isMaskedSecret(slackWebhookUrl)) payload.slackWebhookUrl = slackWebhookUrl;
+  if (!isMaskedSecret(githubWebhookSecret)) payload.githubWebhookSecret = githubWebhookSecret;
 
   const r = await api('POST', '/api/config', payload).catch(err => { toast(err.message, 'err'); return null; });
   if (r?.ok) {

@@ -12,6 +12,7 @@ class ConnectorManager {
     sandbox,
     webClient,
     githubTokenGetter = () => '',
+    settingsGetter = () => ({}),
   } = {}) {
     this._getProjectRoot = typeof getProjectRoot === 'function' ? getProjectRoot : () => process.cwd();
     this._skillRegistry = skillRegistry;
@@ -21,6 +22,7 @@ class ConnectorManager {
     this._sandbox = sandbox;
     this._webClient = webClient;
     this._githubTokenGetter = githubTokenGetter;
+    this._settingsGetter = typeof settingsGetter === 'function' ? settingsGetter : () => ({});
     this._connectors = new Map();
     this._registerBuiltIns();
   }
@@ -141,6 +143,7 @@ class ConnectorManager {
       webClient: this._webClient,
       githubClientFactory: this._githubClientFactory,
       githubToken: this._githubTokenGetter(),
+      settings: this._settingsGetter(),
     };
   }
 
@@ -533,6 +536,50 @@ class ConnectorManager {
           mimeType: 'text/plain',
           content: page.text,
           metadata: { url, domain: page.domain || null },
+        };
+      },
+    });
+
+    this.register({
+      id: 'slack',
+      name: 'Slack',
+      icon: '💬',
+      category: 'connector',
+      auth: { type: 'webhook', field: 'slackWebhookUrl', label: 'Slack webhook URL' },
+      description: 'Send messages to a configured Slack incoming webhook.',
+      trust: { level: 'connected', verified: true, requiresNetwork: true, requiresAuth: true },
+      actions: [
+        {
+          id: 'send-message',
+          name: 'Send message',
+          description: 'Post a message to the configured Slack webhook.',
+          inputs: [
+            { id: 'text', label: 'Message', placeholder: 'clsClaw completed the review run.' },
+            { id: 'username', label: 'Bot name', optional: true, placeholder: 'clsClaw' },
+          ],
+        },
+      ],
+      run: async (actionId, args, ctx) => {
+        if (actionId !== 'send-message') throw new Error(`Unsupported slack action: ${actionId}`);
+        const webhookUrl = String(ctx.settings?.slackWebhookUrl || '').trim();
+        if (!webhookUrl) throw new Error('Slack webhook URL is not configured');
+        if (!args.text) throw new Error('text is required');
+        const response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: String(args.text),
+            username: String(args.username || 'clsClaw'),
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`Slack webhook ${response.status}: ${await response.text()}`);
+        }
+        return {
+          ok: true,
+          connector: 'slack',
+          action: actionId,
+          sent: true,
         };
       },
     });
